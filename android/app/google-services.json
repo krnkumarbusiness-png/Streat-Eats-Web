@@ -1,0 +1,55 @@
+{
+  "project_info": {
+    "project_number": "519115337121",
+    "project_id": "street-eats-mvp",
+    "storage_bucket": "street-eats-mvp.firebasestorage.app"
+  },
+  "client": [
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:519115337121:android:0bad8221eb2370bf03efe0",
+        "android_client_info": {
+          "package_name": "com.streeteats.hld"
+        }
+      },
+      "oauth_client": [
+        {
+          "client_id": "519115337121-191l0l0r9frfbsq0qj727v2e49bbjf62.apps.googleusercontent.com",
+          "client_type": 1,
+          "android_info": {
+            "package_name": "com.streeteats.hld",
+            "certificate_hash": "4f3751601ab034efa366c0072133f78aee43bba1"
+          }
+        },
+        {
+          "client_id": "519115337121-n0mdl674p9loc7pcup3j5fo6t1n78tq5.apps.googleusercontent.com",
+          "client_type": 1,
+          "android_info": {
+            "package_name": "com.streeteats.hld",
+            "certificate_hash": "fde412e0f661ebf580407cf29c8636cce7e7dd1e"
+          }
+        },
+        {
+          "client_id": "519115337121-h4rqiog9eeq6csmbm840jbnfhch7tm5r.apps.googleusercontent.com",
+          "client_type": 3
+        }
+      ],
+      "api_key": [
+        {
+          "current_key": "AIzaSyCgrXhwTEoL09aiyfzf9sDe0V9yhTa565o"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": [
+            {
+              "client_id": "519115337121-h4rqiog9eeq6csmbm840jbnfhch7tm5r.apps.googleusercontent.com",
+              "client_type": 3
+            }
+          ]
+        }
+      }
+    }
+  ],
+  "configuration_version": "1"
+}
