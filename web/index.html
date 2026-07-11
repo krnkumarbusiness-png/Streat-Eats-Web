@@ -1,0 +1,264 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+  <!--
+    base href is replaced by flutter build --base-href.
+    Leave this placeholder as-is.
+  -->
+  <base href="$FLUTTER_BASE_HREF">
+
+  <meta charset="UTF-8">
+  <meta content="IE=Edge" http-equiv="X-UA-Compatible">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+  <meta name="description"
+    content="Order street food, discover local vendors, and track your delivery in Haldwani — all in one place.">
+
+  <!-- ═══════════════════════════════════════════════════════════
+       iOS PWA meta tags
+       iOS Safari does NOT fully respect the web app manifest, so
+       these tags are required separately for iPhone "Add to Home Screen".
+  ═══════════════════════════════════════════════════════════ -->
+
+  <!-- Tells iOS Safari to run the PWA in full-screen standalone mode
+       (hides the Safari address bar and navigation chrome) -->
+  <meta name="apple-mobile-web-app-capable" content="yes">
+
+  <!-- Status bar appearance when launched as a PWA from home screen.
+       "default" = light status bar on the cream (#FFF8F0) background.
+       Other options: "black" (dark), "black-translucent" (overlays content). -->
+  <meta name="apple-mobile-web-app-status-bar-style" content="default">
+
+  <!-- The name displayed under the icon on the iOS home screen -->
+  <meta name="apple-mobile-web-app-title" content="Streat Eats">
+
+  <!-- Icon used by iOS for the home screen shortcut.
+       iOS ignores the manifest icons; it reads this link tag instead.
+       Ideally use a 180x180 PNG (Apple's recommended size for iPhone).
+       Our 192x192 icon works perfectly here — iOS will scale it down. -->
+  <link rel="apple-touch-icon" href="icons/Icon-192.png">
+
+  <!-- ═══════════════════════════════════════════════════════════
+       Standard PWA / browser tags
+  ═══════════════════════════════════════════════════════════ -->
+
+  <!-- Browser tab favicon -->
+  <link rel="icon" type="image/png" href="icons/Icon-192.png">
+
+  <!-- Theme color for Android Chrome's address bar / task switcher -->
+  <meta name="theme-color" content="#FF6B35">
+
+  <title>Streat Eats</title>
+  <link rel="manifest" href="manifest.json">
+
+  <!-- ═══════════════════════════════════════════════════════════
+       Third-party scripts
+  ═══════════════════════════════════════════════════════════ -->
+
+  <!-- Razorpay JS Checkout — required for web payment flow.
+       Must load before any user interaction triggers checkout. -->
+  <script src="https://checkout.razorpay.com/v1/checkout.js"></script>
+
+  <!-- Google Maps JS SDK — required for maps to render on web -->
+  <script src="https://maps.googleapis.com/maps/api/js?key=AIzaSyDQCwkkjmHrlR9_UqJkQYmpMGcAlnFxASk"></script>
+
+  <!-- ═══════════════════════════════════════════════════════════
+       Loading screen styles
+       Shows a branded spinner while the Flutter web engine boots.
+       Flutter calls window.removeSplashFromWeb() when the first
+       frame is ready — that function removes this entire overlay.
+  ═══════════════════════════════════════════════════════════ -->
+  <style id="splash-screen-style">
+    /* Reset */
+    *,
+    *::before,
+    *::after {
+      box-sizing: border-box;
+      margin: 0;
+      padding: 0;
+    }
+
+    html,
+    body {
+      width: 100%;
+      height: 100%;
+      background-color: #FFF8F0;
+      /* matches manifest background_color */
+    }
+
+    /* ── Loading overlay ─────────────────────────────────── */
+    #flutter-loader {
+      position: fixed;
+      inset: 0;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      background-color: #FFF8F0;
+      z-index: 9999;
+      transition: opacity 0.4s ease;
+    }
+
+    #flutter-loader.fade-out {
+      opacity: 0;
+      pointer-events: none;
+    }
+
+    /* App wordmark */
+    #flutter-loader .loader-title {
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+      font-size: 28px;
+      font-weight: 700;
+      color: #FF6B35;
+      letter-spacing: -0.5px;
+      margin-bottom: 8px;
+    }
+
+    #flutter-loader .loader-sub {
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+      font-size: 13px;
+      color: #9CA3AF;
+      margin-bottom: 40px;
+      letter-spacing: 0.5px;
+    }
+
+    /* Spinning ring */
+    .spinner-ring {
+      width: 48px;
+      height: 48px;
+      border: 4px solid #FFE0D0;
+      border-top-color: #FF6B35;
+      border-radius: 50%;
+      animation: spin 0.9s linear infinite;
+    }
+
+    @keyframes spin {
+      to {
+        transform: rotate(360deg);
+      }
+    }
+
+    /* Animated food emoji "bounce" above the spinner */
+    .loader-emoji {
+      font-size: 52px;
+      margin-bottom: 12px;
+      animation: bounce 1.6s ease-in-out infinite;
+      display: block;
+    }
+
+    @keyframes bounce {
+
+      0%,
+      100% {
+        transform: translateY(0);
+      }
+
+      50% {
+        transform: translateY(-12px);
+      }
+    }
+
+    /* ── Utility classes kept for flutter_native_splash ── */
+    .center {
+      margin: 0;
+      position: absolute;
+      top: 50%;
+      left: 50%;
+      -ms-transform: translate(-50%, -50%);
+      transform: translate(-50%, -50%);
+    }
+
+    .contain {
+      display: block;
+      width: 100%;
+      height: 100%;
+      object-fit: contain;
+    }
+
+    .stretch {
+      display: block;
+      width: 100%;
+      height: 100%;
+    }
+
+    .cover {
+      display: block;
+      width: 100%;
+      height: 100%;
+      object-fit: cover;
+    }
+
+    .bottom {
+      position: absolute;
+      bottom: 0;
+      left: 50%;
+      -ms-transform: translate(-50%, 0);
+      transform: translate(-50%, 0);
+    }
+
+    .bottomLeft {
+      position: absolute;
+      bottom: 0;
+      left: 0;
+    }
+
+    .bottomRight {
+      position: absolute;
+      bottom: 0;
+      right: 0;
+    }
+  </style>
+
+  <script id="splash-screen-script">
+    // Called by Flutter when the first frame is painted.
+    // Fades out and removes the loading overlay.
+    function removeSplashFromWeb() {
+      const loader = document.getElementById('flutter-loader');
+      if (loader) {
+        loader.classList.add('fade-out');
+        setTimeout(() => loader.remove(), 450);
+      }
+      // Also remove the flutter_native_splash elements if present
+      document.getElementById('splash')?.remove();
+      document.getElementById('splash-branding')?.remove();
+      document.body.style.background = 'transparent';
+    }
+  </script>
+</head>
+
+<body>
+
+  <!-- ═══════════════════════════════════════════════════════════
+       Branded loading screen
+       Visible from the moment index.html loads until Flutter
+       paints its first frame and calls removeSplashFromWeb().
+  ═══════════════════════════════════════════════════════════ -->
+  <div id="flutter-loader" role="progressbar" aria-label="Loading Streat Eats…">
+    <span class="loader-emoji" aria-hidden="true">🍔</span>
+    <p class="loader-title">Streat Eats</p>
+    <p class="loader-sub">STREET FOOD DELIVERED</p>
+    <div class="spinner-ring"></div>
+  </div>
+
+  <!-- flutter_native_splash picture element (generated by the package) -->
+  <picture id="splash">
+    <source
+      srcset="splash/img/light-1x.png 1x, splash/img/light-2x.png 2x, splash/img/light-3x.png 3x, splash/img/light-4x.png 4x"
+      media="(prefers-color-scheme: light)">
+    <source
+      srcset="splash/img/dark-1x.png 1x, splash/img/dark-2x.png 2x, splash/img/dark-3x.png 3x, splash/img/dark-4x.png 4x"
+      media="(prefers-color-scheme: dark)">
+    <img class="center" aria-hidden="true" src="splash/img/light-1x.png" alt="">
+  </picture>
+
+  <!-- Flutter web bootstrap + service worker registration.
+       flutter_bootstrap.js is merged inline here at build time.
+       It registers sw.js, shows the update/offline banners,
+       then calls _flutter.loader.load() to start the app. -->
+  <script>
+    { { flutter_bootstrap_js } }
+  </script>
+
+</body>
+
+</html>
