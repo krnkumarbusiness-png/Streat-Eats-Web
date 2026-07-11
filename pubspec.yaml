@@ -64,11 +64,13 @@ flutter_launcher_icons:
 flutter:
   uses-material-design: true
   assets:
+    - .env
     - assets/icon.png
     - assets/images/
     - assets/lottie/
     - assets/sounds/
     - assets/fonts/
+
   fonts:
     - family: SpaceMono
       fonts:
