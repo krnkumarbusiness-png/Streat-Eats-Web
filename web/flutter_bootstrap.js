@@ -1,15 +1,5 @@
 // ════════════════════════════════════════════════════════════════
 // web/flutter_bootstrap.js — Streat Eats custom Flutter bootstrap
-//
-// This file is merged with the generated flutter_bootstrap.js
-// at build time via the {{flutter_js}} and {{flutter_build_config}}
-// template tokens. Flutter uses this file as-is from web/.
-//
-// Responsibilities here:
-//   1. Register web/sw.js as the service worker
-//   2. Show "New version available" update banner
-//   3. Show "You're offline" status banner
-//   4. Start Flutter via _flutter.loader.load()
 // ════════════════════════════════════════════════════════════════
 
 {{flutter_js}}
@@ -19,14 +9,10 @@
 (function registerServiceWorker() {
   if (!('serviceWorker' in navigator)) return;
 
-  // Register sw.js — the browser checks for updates on every page load.
-  // sw.js must be served with Cache-Control: no-store (configure on host).
   navigator.serviceWorker.register('/sw.js', { scope: '/' })
     .then((reg) => {
       console.log('[App] Service worker registered, scope:', reg.scope);
 
-      // ── A. Detect when a NEW worker has installed and is waiting ──
-      // This fires if there was already a controller (i.e. not first visit).
       if (reg.waiting) {
         showUpdateBanner(reg.waiting);
       }
@@ -37,7 +23,6 @@
 
         newWorker.addEventListener('statechange', () => {
           if (newWorker.state === 'installed' && navigator.serviceWorker.controller) {
-            // A new version installed while an old one is controlling
             showUpdateBanner(newWorker);
           }
         });
@@ -45,17 +30,14 @@
     })
     .catch((err) => console.warn('[App] SW registration failed:', err));
 
-  // ── B. Listen for messages FROM the service worker ────────────
   navigator.serviceWorker.addEventListener('message', (event) => {
     if (event.data && event.data.type === 'UPDATE_AVAILABLE') {
-      // SW itself broadcast that an update is ready
       navigator.serviceWorker.getRegistration().then((reg) => {
         if (reg && reg.waiting) showUpdateBanner(reg.waiting);
       });
     }
   });
 
-  // ── C. When the SW takes over (after skipWaiting), reload page ──
   let refreshing = false;
   navigator.serviceWorker.addEventListener('controllerchange', () => {
     if (!refreshing) { refreshing = true; window.location.reload(); }
@@ -64,7 +46,6 @@
 
 // ── 2. Update banner ──────────────────────────────────────────────
 function showUpdateBanner(waitingWorker) {
-  // Don't show twice
   if (document.getElementById('se-update-banner')) return;
 
   const banner = document.createElement('div');
@@ -132,7 +113,6 @@ function showUpdateBanner(waitingWorker) {
 
   document.getElementById('se-update-btn').addEventListener('click', () => {
     banner.remove();
-    // Tell the waiting worker to take over immediately
     waitingWorker.postMessage({ type: 'SKIP_WAITING' });
   });
 
@@ -197,7 +177,6 @@ function showUpdateBanner(waitingWorker) {
   window.addEventListener('offline', showOfflineBanner);
   window.addEventListener('online',  hideOfflineBanner);
 
-  // Check immediately in case the page loaded while offline
   if (!navigator.onLine) showOfflineBanner();
 })();
 
