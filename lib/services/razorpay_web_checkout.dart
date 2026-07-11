@@ -1,4 +1,4 @@
-﻿// lib/services/razorpay_web_checkout.dart
+// lib/services/razorpay_web_checkout.dart
 //
 // Razorpay JS Checkout interop for Flutter Web.
 //
@@ -9,6 +9,7 @@
 
 // ignore_for_file: avoid_web_libraries_in_flutter
 import 'dart:js_interop';
+import 'dart:js_interop_unsafe';
 import 'package:flutter/foundation.dart';
 
 // -- Mock classes to prevent compile errors on web -----------------
@@ -33,6 +34,9 @@ class ExternalWalletResponse {
 }
 
 class Razorpay {
+  static const int PAYMENT_CANCELLED = 0;
+  static const int NETWORK_ERROR = 1;
+  static const int INVALID_OPTIONS = 2;
   static const String EVENT_PAYMENT_SUCCESS = 'payment.success';
   static const String EVENT_PAYMENT_ERROR = 'payment.error';
   static const String EVENT_EXTERNAL_WALLET = 'payment.external_wallet';
