@@ -20,6 +20,16 @@ jobs:
           channel: stable
           cache: true
 
+      - name: Generate .env File
+        run: |
+          cat << 'EOF' > .env
+          SUPABASE_URL=https://vqomspeqeyodxsrmzmkf.supabase.co
+          SUPABASE_ANON_KEY=eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InZxb21zcGVxZXlvZHhzcm16bWtmIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzQ3NTg3ODcsImV4cCI6MjA5MDMzNDc4N30.ZsHty368h25Ze24b_ekyDIvQRaEPXvT1JWtIUY7Tbmk
+          GOOGLE_ANDROID_CLIENT_ID=519115337121-n0mdl674p9loc7pcup3j5fo6t1n78tq5.apps.googleusercontent.com
+          GOOGLE_WEB_CLIENT_ID=519115337121-h4rqiog9eeq6csmbm840jbnfhch7tm5r.apps.googleusercontent.com
+          ADMIN_USER_ID=942288eb-2609-4a89-b89a-00cb3a7bf8e5
+          EOF
+
       - name: Install dependencies
         run: flutter pub get
 
