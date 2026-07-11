@@ -1,6 +1,10 @@
+import 'package:flutter/foundation.dart' show kIsWeb;
 import 'package:flutter/material.dart';
-import 'package:google_maps_flutter/google_maps_flutter.dart';
-import 'package:geocoding/geocoding.dart';
+// Conditional imports — on web, use lightweight stubs (no Google Maps / geocoding)
+import 'package:google_maps_flutter/google_maps_flutter.dart'
+    if (dart.library.js_interop) '../stub/maps_stub.dart';
+import 'package:geocoding/geocoding.dart'
+    if (dart.library.js_interop) '../stub/geocoding_stub.dart';
 import '../services/location_service.dart';
 
 class PickedLocationResult {
@@ -29,6 +33,9 @@ class _LocationPickerScreenState extends State<LocationPickerScreen> {
   String _address = 'Move the map to select location';
   bool _loadingAddress = false;
 
+  // Web-only: text controller for manual address entry
+  final _webAddressController = TextEditingController();
+
   static const _primaryColor = Color(0xFFFF6B35);
   static const _textPrimary = Color(0xFF1A1A1A);
   static const _textMuted = Color(0xFF6B7280);
@@ -36,6 +43,7 @@ class _LocationPickerScreenState extends State<LocationPickerScreen> {
   @override
   void initState() {
     super.initState();
+    if (kIsWeb) return; // No map operations on web
     if (widget.initialLat != null && widget.initialLng != null) {
       _pickedPosition = LatLng(widget.initialLat!, widget.initialLng!);
       _reverseGeocode(_pickedPosition);
@@ -44,7 +52,14 @@ class _LocationPickerScreenState extends State<LocationPickerScreen> {
     }
   }
 
+  @override
+  void dispose() {
+    _webAddressController.dispose();
+    super.dispose();
+  }
+
   Future<void> _detectCurrentLocation() async {
+    if (kIsWeb) return;
     try {
       final pos = await LocationService().getCurrentPosition();
       if (pos != null && mounted) {
@@ -61,6 +76,7 @@ class _LocationPickerScreenState extends State<LocationPickerScreen> {
   }
 
   Future<void> _reverseGeocode(LatLng pos) async {
+    if (kIsWeb) return;
     setState(() => _loadingAddress = true);
     try {
       final placemarks = await placemarkFromCoordinates(
@@ -97,6 +113,123 @@ class _LocationPickerScreenState extends State<LocationPickerScreen> {
 
   @override
   Widget build(BuildContext context) {
+    // Web: simple address text form (no Google Maps dependency)
+    if (kIsWeb) return _buildWebAddressForm();
+    // Mobile: full Google Maps experience
+    return _buildMobileMapPicker();
+  }
+
+  // ── Web UI ────────────────────────────────────────────────────
+  Widget _buildWebAddressForm() {
+    return Scaffold(
+      backgroundColor: Colors.white,
+      appBar: AppBar(
+        backgroundColor: Colors.white,
+        elevation: 0,
+        leading: IconButton(
+          icon: const Icon(Icons.arrow_back_rounded, color: _textPrimary),
+          onPressed: () => Navigator.pop(context),
+        ),
+        title: const Text(
+          'Enter Delivery Address',
+          style: TextStyle(
+            fontFamily: 'Poppins',
+            fontWeight: FontWeight.w700,
+            fontSize: 16,
+            color: _textPrimary,
+          ),
+        ),
+      ),
+      body: Padding(
+        padding: const EdgeInsets.all(20),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            const Text(
+              'Please type your full delivery address in Haldwani.',
+              style: TextStyle(
+                fontFamily: 'Poppins',
+                fontSize: 13,
+                color: _textMuted,
+              ),
+            ),
+            const SizedBox(height: 20),
+            TextField(
+              controller: _webAddressController,
+              maxLines: 3,
+              autofocus: true,
+              style: const TextStyle(fontFamily: 'Poppins', fontSize: 14, color: _textPrimary),
+              decoration: InputDecoration(
+                hintText:
+                    'e.g. Shop 5, Haldwani Market, Near Clock Tower, Haldwani',
+                hintStyle: const TextStyle(
+                  color: _textMuted,
+                  fontFamily: 'Poppins',
+                  fontSize: 13,
+                ),
+                border: OutlineInputBorder(
+                  borderRadius: BorderRadius.circular(14),
+                ),
+                focusedBorder: OutlineInputBorder(
+                  borderRadius: BorderRadius.circular(14),
+                  borderSide: const BorderSide(color: _primaryColor, width: 2),
+                ),
+                prefixIcon: const Padding(
+                  padding: EdgeInsets.only(bottom: 40),
+                  child: Icon(Icons.location_on, color: _primaryColor),
+                ),
+              ),
+            ),
+            const SizedBox(height: 24),
+            SizedBox(
+              width: double.infinity,
+              height: 50,
+              child: ElevatedButton(
+                onPressed: () {
+                  final address = _webAddressController.text.trim();
+                  if (address.isEmpty) {
+                    ScaffoldMessenger.of(context).showSnackBar(
+                      const SnackBar(
+                        content: Text('Please enter your delivery address'),
+                      ),
+                    );
+                    return;
+                  }
+                  Navigator.pop(
+                    context,
+                    PickedLocationResult(
+                      lat: 29.2183, // Haldwani default coords
+                      lng: 79.5130,
+                      address: address,
+                    ),
+                  );
+                },
+                style: ElevatedButton.styleFrom(
+                  backgroundColor: _primaryColor,
+                  elevation: 0,
+                  shape: RoundedRectangleBorder(
+                    borderRadius: BorderRadius.circular(14),
+                  ),
+                ),
+                child: const Text(
+                  'Confirm Address',
+                  style: TextStyle(
+                    fontFamily: 'Poppins',
+                    fontWeight: FontWeight.w700,
+                    color: Colors.white,
+                    fontSize: 15,
+                  ),
+                ),
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  // ── Mobile UI (Google Maps) ────────────────────────────────────
+  Widget _buildMobileMapPicker() {
     return Scaffold(
       body: Stack(
         children: [
