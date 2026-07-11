@@ -18,12 +18,9 @@ import 'force_update_screen.dart';
 // ─── Brand colors (inline so splash is self-contained) ───────
 class _C {
   static const primary = Color(0xFFFF6B35);
-  static const background = Color(0xFFFFF8F0);
-  static const surface = Color(0xFFFFFFFF);
-  static const textPrimary = Color(0xFF1A1A1A);
-  static const textSecondary = Color(0xFF3D3D3D);
-  static const textMuted = Color(0xFF6B7280);
-  static const border = Color(0xFFE5E7EB);
+  static const bg = Color(0xFFFFF8F0);
+  static const text = Color(0xFF1A1A1A);
+  static const textLight = Color(0xFF6B7280);
 }
 
 class SplashScreen extends StatefulWidget {
@@ -35,7 +32,7 @@ class SplashScreen extends StatefulWidget {
 
 class _SplashScreenState extends State<SplashScreen>
     with TickerProviderStateMixin {
-  // Stagger controllers
+  // Animations
   late AnimationController _bgController;
   late AnimationController _logoController;
   late AnimationController _titleController;
@@ -45,22 +42,15 @@ class _SplashScreenState extends State<SplashScreen>
   late AnimationController _progressController;
 
   late Animation<double> _bgFade;
-
-  late Animation<double> _logoFade;
   late Animation<double> _logoScale;
-
+  late Animation<double> _logoFade;
   late Animation<Offset> _titleSlide;
   late Animation<double> _titleFade;
-
+  late Animation<Offset> _taglineSlide;
   late Animation<double> _taglineFade;
-
   late Animation<Offset> _imageSlide;
   late Animation<double> _imageFade;
-  late Animation<double> _imageScale;
-
   late Animation<double> _loadingFade;
-
-  // Progress bar — animates from 0 to 1 over ~1800ms
   late Animation<double> _progress;
 
   @override
@@ -68,83 +58,71 @@ class _SplashScreenState extends State<SplashScreen>
     super.initState();
     _setupAnimations();
     _startSequence();
-    Future.delayed(
-      const Duration(milliseconds: 2400),
-      _checkVersionAndNavigate,
-    );
+    _checkVersionAndNavigate(); // Core navigation logic
   }
 
   void _setupAnimations() {
-    // Background fade
+    // 1. Background
     _bgController = AnimationController(
       vsync: this,
-      duration: const Duration(milliseconds: 300),
+      duration: const Duration(milliseconds: 600),
     );
-    _bgFade = Tween<double>(
-      begin: 0,
-      end: 1,
-    ).animate(CurvedAnimation(parent: _bgController, curve: Curves.easeOut));
+    _bgFade = Tween<double>(begin: 0, end: 1).animate(
+      CurvedAnimation(parent: _bgController, curve: Curves.easeOut),
+    );
 
-    // Logo icon bounce
+    // 2. Logo Icon
     _logoController = AnimationController(
       vsync: this,
       duration: const Duration(milliseconds: 700),
     );
-    _logoFade = Tween<double>(begin: 0, end: 1).animate(
-      CurvedAnimation(
-        parent: _logoController,
-        curve: const Interval(0, 0.5, curve: Curves.easeOut),
-      ),
-    );
-    _logoScale = Tween<double>(begin: 0.6, end: 1.0).animate(
+    _logoScale = Tween<double>(begin: 0.5, end: 1.0).animate(
       CurvedAnimation(parent: _logoController, curve: Curves.elasticOut),
     );
+    _logoFade = Tween<double>(begin: 0, end: 1).animate(
+      CurvedAnimation(parent: _logoController, curve: Curves.easeIn),
+    );
 
-    // Title slide up
+    // 3. Title (Streat Eats)
     _titleController = AnimationController(
       vsync: this,
-      duration: const Duration(milliseconds: 650),
+      duration: const Duration(milliseconds: 600),
     );
-    _titleSlide = Tween<Offset>(begin: const Offset(0, 0.5), end: Offset.zero)
+    _titleSlide = Tween<Offset>(begin: const Offset(0, 0.3), end: Offset.zero)
         .animate(
-          CurvedAnimation(parent: _titleController, curve: Curves.easeOutCubic),
-        );
+      CurvedAnimation(parent: _titleController, curve: Curves.easeOutCubic),
+    );
     _titleFade = Tween<double>(begin: 0, end: 1).animate(
-      CurvedAnimation(
-        parent: _titleController,
-        curve: const Interval(0, 0.6, curve: Curves.easeOut),
-      ),
+      CurvedAnimation(parent: _titleController, curve: Curves.easeOut),
     );
 
-    // Tagline fade
+    // 4. Tagline (Haldwani's best...)
     _taglineController = AnimationController(
       vsync: this,
-      duration: const Duration(milliseconds: 500),
+      duration: const Duration(milliseconds: 600),
+    );
+    _taglineSlide = Tween<Offset>(begin: const Offset(0, 0.3), end: Offset.zero)
+        .animate(
+      CurvedAnimation(parent: _taglineController, curve: Curves.easeOutCubic),
     );
     _taglineFade = Tween<double>(begin: 0, end: 1).animate(
       CurvedAnimation(parent: _taglineController, curve: Curves.easeOut),
     );
 
-    // Rider image slide up + scale
+    // 5. Hero Image (Rider)
     _imageController = AnimationController(
       vsync: this,
       duration: const Duration(milliseconds: 800),
     );
     _imageSlide = Tween<Offset>(begin: const Offset(0, 0.15), end: Offset.zero)
         .animate(
-          CurvedAnimation(parent: _imageController, curve: Curves.easeOutCubic),
-        );
-    _imageFade = Tween<double>(begin: 0, end: 1).animate(
-      CurvedAnimation(
-        parent: _imageController,
-        curve: const Interval(0, 0.5, curve: Curves.easeOut),
-      ),
-    );
-    _imageScale = Tween<double>(begin: 0.92, end: 1.0).animate(
       CurvedAnimation(parent: _imageController, curve: Curves.easeOutCubic),
     );
+    _imageFade = Tween<double>(begin: 0, end: 1).animate(
+      CurvedAnimation(parent: _imageController, curve: Curves.easeOut),
+    );
 
-    // Loading section fade
+    // 6. Loading Text & Bar
     _loadingController = AnimationController(
       vsync: this,
       duration: const Duration(milliseconds: 400),
@@ -188,19 +166,7 @@ class _SplashScreenState extends State<SplashScreen>
   Future<void> _checkVersionAndNavigate() async {
     if (!mounted) return;
 
-    try {
-      final result = await InternetAddress.lookup('google.com').timeout(
-        const Duration(seconds: 5),
-        onTimeout: () => throw const SocketException('timeout'),
-      );
-      if (result.isEmpty || result[0].rawAddress.isEmpty) {
-        _showNoInternetError();
-        return;
-      }
-    } on SocketException catch (_) {
-      _showNoInternetError();
-      return;
-    }
+    // Internet check removed for Web compatibility
 
     try {
       final versionService = VersionService();
@@ -248,33 +214,24 @@ class _SplashScreenState extends State<SplashScreen>
       builder: (ctx) => PopScope(
         canPop: false,
         child: AlertDialog(
-          backgroundColor: _C.surface,
+          backgroundColor: Colors.white,
           shape: RoundedRectangleBorder(
-            borderRadius: BorderRadius.circular(20),
+            borderRadius: BorderRadius.circular(16),
           ),
-          title: const Row(
-            children: [
-              Text('🎉 ', style: TextStyle(fontSize: 20)),
-              Text(
-                'Update Available!',
-                style: TextStyle(
-                  color: _C.textPrimary,
-                  fontFamily: 'Poppins',
-                  fontWeight: FontWeight.w700,
-                  fontSize: 16,
-                ),
-              ),
-            ],
+          title: const Text(
+            'Update Available',
+            style: TextStyle(
+              fontFamily: 'Poppins',
+              fontWeight: FontWeight.bold,
+              color: Color(0xFF1A1A1A),
+            ),
           ),
           content: Text(
-            message.isNotEmpty
-                ? message
-                : 'A new version is available! Update now for the latest features.',
+            message,
             style: const TextStyle(
-              color: _C.textSecondary,
               fontFamily: 'Poppins',
-              fontSize: 13,
-              height: 1.5,
+              fontSize: 14,
+              color: Color(0xFF6B7280),
             ),
           ),
           actions: [
@@ -282,37 +239,32 @@ class _SplashScreenState extends State<SplashScreen>
               onPressed: () => Navigator.pop(ctx),
               child: const Text(
                 'Later',
-                style: TextStyle(color: _C.textMuted, fontFamily: 'Poppins'),
+                style: TextStyle(
+                  fontFamily: 'Poppins',
+                  fontWeight: FontWeight.w600,
+                  color: Color(0xFF6B7280),
+                ),
               ),
             ),
             ElevatedButton(
               onPressed: () async {
-                Navigator.pop(ctx);
-                if (apkUrl.isNotEmpty) {
-                  final uri = Uri.parse(apkUrl);
-                  try {
-                    if (await canLaunchUrl(uri)) {
-                      await launchUrl(
-                        uri,
-                        mode: LaunchMode.externalApplication,
-                      );
-                    }
-                  } catch (_) {}
+                final url = Uri.parse(apkUrl);
+                if (await canLaunchUrl(url)) {
+                  await launchUrl(url, mode: LaunchMode.externalApplication);
                 }
               },
               style: ElevatedButton.styleFrom(
-                backgroundColor: _C.primary,
+                backgroundColor: const Color(0xFFFF6B35),
                 shape: RoundedRectangleBorder(
-                  borderRadius: BorderRadius.circular(10),
+                  borderRadius: BorderRadius.circular(8),
                 ),
-                elevation: 0,
               ),
               child: const Text(
                 'Update Now',
                 style: TextStyle(
-                  color: Colors.white,
                   fontFamily: 'Poppins',
-                  fontWeight: FontWeight.w700,
+                  fontWeight: FontWeight.bold,
+                  color: Colors.white,
                 ),
               ),
             ),
@@ -323,58 +275,60 @@ class _SplashScreenState extends State<SplashScreen>
   }
 
   Future<void> _navigate() async {
-    if (!mounted) return;
-
-    final supabase = Supabase.instance.client;
-    final session = supabase.auth.currentSession;
-
+    final session = Supabase.instance.client.auth.currentSession;
     if (session == null) {
-      _goTo(const HomeScreen());
-      return;
-    }
-
-    final user = supabase.auth.currentUser;
-    if (user == null) {
-      _goTo(const HomeScreen());
+      if (mounted) {
+        Navigator.pushReplacement(
+          context,
+          PageRouteBuilder(
+            transitionDuration: const Duration(milliseconds: 800),
+            pageBuilder: (_, __, ___) => const HomeScreen(),
+            transitionsBuilder: (_, animation, __, child) {
+              return FadeTransition(opacity: animation, child: child);
+            },
+          ),
+        );
+      }
       return;
     }
 
     try {
-      final userData = await supabase
+      final user = session.user;
+      final response = await Supabase.instance.client
           .from('users')
-          .select('is_blocked')
+          .select('role, is_banned')
           .eq('id', user.id)
           .maybeSingle();
 
       if (!mounted) return;
 
-      final isBlocked = userData?['is_blocked'] as bool? ?? false;
-      if (isBlocked) {
-        _goTo(const HomeScreen());
+      if (response != null && response['is_banned'] == true) {
+        await Supabase.instance.client.auth.signOut();
+        Navigator.pushReplacement(
+          context,
+          MaterialPageRoute(builder: (_) => const _BannedScreen()),
+        );
         return;
       }
 
-      _goTo(const HomeScreen());
-    } catch (e) {
-      debugPrint('Splash navigate error: $e');
-      if (!mounted) return;
-      _goTo(const HomeScreen());
-    }
-  }
-
-  void _goTo(Widget screen) {
-    if (!mounted) return;
-    Navigator.pushReplacement(
-      context,
-      PageRouteBuilder(
-        pageBuilder: (_, animation, __) => screen,
-        transitionsBuilder: (_, animation, __, child) => FadeTransition(
-          opacity: CurvedAnimation(parent: animation, curve: Curves.easeOut),
-          child: child,
+      Navigator.pushReplacement(
+        context,
+        PageRouteBuilder(
+          transitionDuration: const Duration(milliseconds: 800),
+          pageBuilder: (_, __, ___) => const HomeScreen(),
+          transitionsBuilder: (_, animation, __, child) {
+            return FadeTransition(opacity: animation, child: child);
+          },
         ),
-        transitionDuration: const Duration(milliseconds: 400),
-      ),
-    );
+      );
+    } catch (_) {
+      if (mounted) {
+        Navigator.pushReplacement(
+          context,
+          MaterialPageRoute(builder: (_) => const HomeScreen()),
+        );
+      }
+    }
   }
 
   @override
@@ -389,41 +343,108 @@ class _SplashScreenState extends State<SplashScreen>
     super.dispose();
   }
 
-  // ─────────────────────────────────────────────────────────────
-  // BUILD
-  // ─────────────────────────────────────────────────────────────
+  // ─── UI Build ────────────────────────────────────────────────
   @override
   Widget build(BuildContext context) {
-    final screenH = MediaQuery.of(context).size.height;
-
     return Scaffold(
-      backgroundColor: _C.background,
+      backgroundColor: _C.bg,
       body: FadeTransition(
         opacity: _bgFade,
-        child: SafeArea(
-          top: false,
-          child: Column(
+        child: SizedBox(
+          width: double.infinity,
+          height: double.infinity,
+          child: Stack(
             children: [
-              // ── MIDDLE: Rider illustration — centered ──
-              Expanded(
-                child: AnimatedBuilder(
-                  animation: _imageController,
-                  builder: (_, child) => SlideTransition(
-                    position: _imageSlide,
-                    child: FadeTransition(
-                      opacity: _imageFade,
-                      child: Transform.scale(
-                        scale: _imageScale.value,
-                        child: child,
+              // 1. Top Section (Logo + Title)
+              Positioned(
+                top: MediaQuery.of(context).size.height * 0.15,
+                left: 0,
+                right: 0,
+                child: Column(
+                  children: [
+                    // Icon
+                    FadeTransition(
+                      opacity: _logoFade,
+                      child: ScaleTransition(
+                        scale: _logoScale,
+                        child: Container(
+                          width: 80,
+                          height: 80,
+                          padding: const EdgeInsets.all(16),
+                          decoration: BoxDecoration(
+                            color: Colors.white,
+                            shape: BoxShape.circle,
+                            boxShadow: [
+                              BoxShadow(
+                                color: _C.primary.withOpacity(0.2),
+                                blurRadius: 24,
+                                offset: const Offset(0, 8),
+                              ),
+                            ],
+                          ),
+                          child: Image.asset(
+                            'assets/icon.png',
+                            fit: BoxFit.contain,
+                          ),
+                        ),
                       ),
                     ),
-                  ),
-                  child: Center(
-                    // ✅ Center wrap kiya
+                    const SizedBox(height: 24),
+                    // Title
+                    SlideTransition(
+                      position: _titleSlide,
+                      child: FadeTransition(
+                        opacity: _titleFade,
+                        child: const Text(
+                          'STREAT EATS',
+                          style: TextStyle(
+                            fontFamily: 'SpaceMono',
+                            fontSize: 32,
+                            fontWeight: FontWeight.bold,
+                            letterSpacing: 2,
+                            color: _C.text,
+                          ),
+                        ),
+                      ),
+                    ),
+                    const SizedBox(height: 8),
+                    // Tagline
+                    SlideTransition(
+                      position: _taglineSlide,
+                      child: FadeTransition(
+                        opacity: _taglineFade,
+                        child: const Text(
+                          'Haldwani\'s best street food,\ndelivered hot.',
+                          textAlign: TextAlign.center,
+                          style: TextStyle(
+                            fontFamily: 'Poppins',
+                            fontSize: 15,
+                            height: 1.4,
+                            fontWeight: FontWeight.w500,
+                            color: _C.textLight,
+                          ),
+                        ),
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+
+              // 2. Middle Section (Hero Illustration)
+              Positioned(
+                top: MediaQuery.of(context).size.height * 0.42,
+                left: 0,
+                right: 0,
+                bottom: MediaQuery.of(context).size.height * 0.15,
+                child: SlideTransition(
+                  position: _imageSlide,
+                  child: FadeTransition(
+                    opacity: _imageFade,
                     child: Padding(
-                      padding: const EdgeInsets.symmetric(horizontal: 16),
+                      padding: const EdgeInsets.symmetric(horizontal: 20),
+                      // Full image display without circle crop
                       child: Image.asset(
-                        'assets/images/illus_splash_rider.jpg',
+                        'assets/images/rider_illustration.png',
                         fit: BoxFit.contain,
                       ),
                     ),
@@ -431,68 +452,55 @@ class _SplashScreenState extends State<SplashScreen>
                 ),
               ),
 
-              // ── BOTTOM: Loading icon + progress bar + text ──
-              FadeTransition(
-                opacity: _loadingFade,
-                child: Padding(
-                  padding: const EdgeInsets.fromLTRB(40, 0, 40, 40),
+              // 3. Bottom Section (Progress Bar + Text)
+              Positioned(
+                bottom: MediaQuery.of(context).size.height * 0.08,
+                left: 40,
+                right: 40,
+                child: FadeTransition(
+                  opacity: _loadingFade,
                   child: Column(
                     children: [
-                      // Small delivery icon (reference jaisa)
+                      // Animated Progress Bar
                       Container(
-                        width: 36,
-                        height: 36,
+                        height: 6,
+                        width: 200,
                         decoration: BoxDecoration(
-                          color: _C.primary.withOpacity(0.10),
-                          shape: BoxShape.circle,
+                          color: _C.primary.withOpacity(0.15),
+                          borderRadius: BorderRadius.circular(10),
                         ),
-                        child: const Center(
-                          child: Text('🛵', style: TextStyle(fontSize: 18)),
-                        ),
-                      ),
-
-                      const SizedBox(height: 14),
-
-                      // Animated progress bar
-                      AnimatedBuilder(
-                        animation: _progressController,
-                        builder: (_, __) => Container(
-                          height: 4,
-                          decoration: BoxDecoration(
-                            color: _C.primary.withOpacity(0.15),
-                            borderRadius: BorderRadius.circular(4),
-                          ),
-                          child: FractionallySizedBox(
-                            alignment: Alignment.centerLeft,
-                            widthFactor: _progress.value,
-                            child: Container(
-                              decoration: BoxDecoration(
-                                color: _C.primary,
-                                borderRadius: BorderRadius.circular(4),
-                                boxShadow: [
-                                  BoxShadow(
-                                    color: _C.primary.withOpacity(0.4),
-                                    blurRadius: 6,
-                                    offset: const Offset(0, 2),
-                                  ),
-                                ],
+                        child: AnimatedBuilder(
+                          animation: _progress,
+                          builder: (context, child) {
+                            return FractionallySizedBox(
+                              alignment: Alignment.centerLeft,
+                              widthFactor: _progress.value,
+                              child: Container(
+                                decoration: BoxDecoration(
+                                  color: _C.primary,
+                                  borderRadius: BorderRadius.circular(10),
+                                  boxShadow: [
+                                    BoxShadow(
+                                      color: _C.primary.withOpacity(0.4),
+                                      blurRadius: 8,
+                                      offset: const Offset(0, 2),
+                                    ),
+                                  ],
+                                ),
                               ),
-                            ),
-                          ),
+                            );
+                          },
                         ),
                       ),
-
-                      const SizedBox(height: 12),
-
-                      // "Loading deliciousness... ❤️" — reference jaisa
+                      const SizedBox(height: 16),
+                      // Text
                       const Text(
                         'Loading deliciousness... ❤️',
                         style: TextStyle(
                           fontFamily: 'Poppins',
-                          fontSize: 12,
-                          color: _C.textMuted,
-                          fontWeight: FontWeight.w500,
-                          letterSpacing: 0.2,
+                          fontSize: 13,
+                          fontWeight: FontWeight.w600,
+                          color: _C.textLight,
                         ),
                       ),
                     ],
@@ -507,62 +515,60 @@ class _SplashScreenState extends State<SplashScreen>
   }
 }
 
-// ─────────────────────────────────────────────────────────────
-// NO INTERNET SCREEN — preserved from v5.0
-// ─────────────────────────────────────────────────────────────
+// ─── Utility Screens (Preserved from v5.0) ────────────────────
+
 class _NoInternetScreen extends StatelessWidget {
   const _NoInternetScreen();
 
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      backgroundColor: _C.background,
+      backgroundColor: _C.bg,
       body: Center(
         child: Padding(
-          padding: const EdgeInsets.symmetric(horizontal: 32),
+          padding: const EdgeInsets.all(32),
           child: Column(
             mainAxisAlignment: MainAxisAlignment.center,
             children: [
               Container(
-                width: 96,
-                height: 96,
+                padding: const EdgeInsets.all(24),
                 decoration: BoxDecoration(
-                  color: _C.primary.withOpacity(0.10),
+                  color: Colors.white,
                   shape: BoxShape.circle,
-                  border: Border.all(
-                    color: _C.primary.withOpacity(0.25),
-                    width: 2,
-                  ),
+                  boxShadow: [
+                    BoxShadow(
+                      color: Colors.black.withOpacity(0.05),
+                      blurRadius: 20,
+                    ),
+                  ],
                 ),
                 child: const Icon(
                   Icons.wifi_off_rounded,
+                  size: 64,
                   color: _C.primary,
-                  size: 44,
                 ),
               ),
-              const SizedBox(height: 28),
+              const SizedBox(height: 32),
               const Text(
                 'No Internet Connection',
                 style: TextStyle(
-                  color: _C.textPrimary,
+                  fontFamily: 'Poppins',
                   fontSize: 22,
-                  fontWeight: FontWeight.w800,
-                  fontFamily: 'Poppins',
+                  fontWeight: FontWeight.bold,
+                  color: _C.text,
                 ),
-                textAlign: TextAlign.center,
               ),
-              const SizedBox(height: 10),
+              const SizedBox(height: 12),
               const Text(
-                'Please check your connection and try again.',
-                style: TextStyle(
-                  color: _C.textMuted,
-                  fontSize: 14,
-                  fontFamily: 'Poppins',
-                  height: 1.6,
-                ),
+                'Please check your network settings and try again.',
                 textAlign: TextAlign.center,
+                style: TextStyle(
+                  fontFamily: 'Poppins',
+                  fontSize: 15,
+                  color: _C.textLight,
+                ),
               ),
-              const SizedBox(height: 36),
+              const SizedBox(height: 40),
               SizedBox(
                 width: double.infinity,
                 height: 54,
@@ -570,36 +576,118 @@ class _NoInternetScreen extends StatelessWidget {
                   onPressed: () {
                     Navigator.pushReplacement(
                       context,
-                      MaterialPageRoute(builder: (_) => const SplashScreen()),
+                      MaterialPageRoute(
+                        builder: (_) => const SplashScreen(),
+                      ),
                     );
                   },
                   style: ElevatedButton.styleFrom(
                     backgroundColor: _C.primary,
-                    elevation: 0,
                     shape: RoundedRectangleBorder(
-                      borderRadius: BorderRadius.circular(14),
+                      borderRadius: BorderRadius.circular(16),
                     ),
+                    elevation: 4,
+                    shadowColor: _C.primary.withOpacity(0.4),
                   ),
                   child: const Text(
                     'Try Again',
                     style: TextStyle(
-                      color: Colors.white,
-                      fontSize: 16,
-                      fontWeight: FontWeight.w700,
                       fontFamily: 'Poppins',
+                      fontSize: 16,
+                      fontWeight: FontWeight.bold,
+                      color: Colors.white,
                     ),
                   ),
                 ),
               ),
-              const SizedBox(height: 24),
-              const Text(
-                'Streat Eats — Street Food, Delivered Fast! 🍽️',
-                style: TextStyle(
-                  color: _C.textMuted,
-                  fontSize: 12,
-                  fontFamily: 'Poppins',
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+class _BannedScreen extends StatelessWidget {
+  const _BannedScreen();
+
+  @override
+  Widget build(BuildContext context) {
+    return Scaffold(
+      backgroundColor: _C.bg,
+      body: Center(
+        child: Padding(
+          padding: const EdgeInsets.all(32),
+          child: Column(
+            mainAxisAlignment: MainAxisAlignment.center,
+            children: [
+              Container(
+                padding: const EdgeInsets.all(24),
+                decoration: BoxDecoration(
+                  color: Colors.white,
+                  shape: BoxShape.circle,
+                  boxShadow: [
+                    BoxShadow(
+                      color: Colors.red.withOpacity(0.1),
+                      blurRadius: 20,
+                    ),
+                  ],
                 ),
+                child: const Icon(
+                  Icons.block_rounded,
+                  size: 64,
+                  color: Colors.red,
+                ),
+              ),
+              const SizedBox(height: 32),
+              const Text(
+                'Account Suspended',
+                style: TextStyle(
+                  fontFamily: 'Poppins',
+                  fontSize: 22,
+                  fontWeight: FontWeight.bold,
+                  color: _C.text,
+                ),
+              ),
+              const SizedBox(height: 12),
+              const Text(
+                'Your account has been suspended due to policy violations. Please contact support.',
                 textAlign: TextAlign.center,
+                style: TextStyle(
+                  fontFamily: 'Poppins',
+                  fontSize: 15,
+                  color: _C.textLight,
+                ),
+              ),
+              const SizedBox(height: 40),
+              SizedBox(
+                width: double.infinity,
+                height: 54,
+                child: ElevatedButton(
+                  onPressed: () {
+                    Navigator.pushReplacement(
+                      context,
+                      MaterialPageRoute(
+                        builder: (_) => const HomeScreen(),
+                      ),
+                    );
+                  },
+                  style: ElevatedButton.styleFrom(
+                    backgroundColor: _C.text,
+                    shape: RoundedRectangleBorder(
+                      borderRadius: BorderRadius.circular(16),
+                    ),
+                  ),
+                  child: const Text(
+                    'Back to Home',
+                    style: TextStyle(
+                      fontFamily: 'Poppins',
+                      fontSize: 16,
+                      fontWeight: FontWeight.bold,
+                      color: Colors.white,
+                    ),
+                  ),
+                ),
               ),
             ],
           ),
