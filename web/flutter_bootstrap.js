@@ -1,4 +1,4 @@
-﻿// ════════════════════════════════════════════════════════════════
+// ════════════════════════════════════════════════════════════════
 // web/flutter_bootstrap.js — Streat Eats custom Flutter bootstrap
 //
 // This file is merged with the generated flutter_bootstrap.js
@@ -202,4 +202,12 @@ function showUpdateBanner(waitingWorker) {
 })();
 
 // ── 4. Start Flutter ──────────────────────────────────────────────
-_flutter.loader.load();
+_flutter.loader.load({
+  onEntrypointLoaded: async function(engineInitializer) {
+    const appRunner = await engineInitializer.initializeEngine();
+    await appRunner.runApp();
+    if (typeof removeSplashFromWeb === 'function') {
+      removeSplashFromWeb();
+    }
+  }
+});
