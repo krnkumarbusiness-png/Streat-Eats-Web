@@ -1680,6 +1680,11 @@ class _CheckoutScreenState extends State<CheckoutScreen> {
         _showPaymentLoading = false;
       });
 
+      try {
+        final prefs = await SharedPreferences.getInstance();
+        await prefs.setString('pending_rzp_order_id', rzpOrderId);
+      } catch (_) {}
+
       final payOptions = {
         'key': keyId,
         'order_id': rzpOrderId,
