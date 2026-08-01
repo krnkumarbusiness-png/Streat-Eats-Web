@@ -9,15 +9,12 @@
 
 import 'dart:io';
 import 'package:flutter/material.dart';
-import 'package:shared_preferences/shared_preferences.dart';
 import 'package:url_launcher/url_launcher.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 import '../services/version_service.dart';
 import 'home_screen.dart';
-import 'admin/admin_main_screen.dart';
-import 'rider/rider_dashboard_screen.dart';
-import 'rider/rider_pending_screen.dart';
 import 'force_update_screen.dart';
+import '../constants/globals.dart';
 
 // ─── Brand colors (inline so splash is self-contained) ───────
 class _C {
@@ -70,6 +67,7 @@ class _SplashScreenState extends State<SplashScreen>
   @override
   void initState() {
     super.initState();
+    CartVisibilityControl.hide();
     _setupAnimations();
     _startSequence();
     Future.delayed(
@@ -343,17 +341,10 @@ class _SplashScreenState extends State<SplashScreen>
       return;
     }
 
-    final isAdmin = user.appMetadata['role'] == 'admin';
-    if (isAdmin) {
-      await _saveRoleCache('admin');
-      _goTo(const AdminMainScreen());
-      return;
-    }
-
     try {
       final userData = await supabase
           .from('users')
-          .select('role, phone, is_blocked')
+          .select('is_blocked')
           .eq('id', user.id)
           .maybeSingle();
 
@@ -361,42 +352,7 @@ class _SplashScreenState extends State<SplashScreen>
 
       final isBlocked = userData?['is_blocked'] as bool? ?? false;
       if (isBlocked) {
-        await _saveRoleCache('customer');
         _goTo(const HomeScreen());
-        return;
-      }
-
-      final String role = userData?['role'] as String? ?? 'customer';
-      await _saveRoleCache(role);
-
-      if (role == 'rider') {
-        final String userPhone = userData?['phone'] as String? ?? '';
-        if (userPhone.isEmpty) {
-          _goTo(const RiderPendingScreen());
-          return;
-        }
-
-        final riderData = await supabase
-            .from('riders')
-            .select('id, status, is_approved')
-            .eq('phone', userPhone)
-            .maybeSingle();
-
-        if (!mounted) return;
-
-        if (riderData == null) {
-          _goTo(const RiderPendingScreen());
-          return;
-        }
-
-        final String riderStatus = riderData['status'] as String? ?? 'pending';
-        final bool isApproved = riderData['is_approved'] as bool? ?? false;
-
-        if (riderStatus == 'approved' || isApproved) {
-          _goTo(const RiderDashboardScreen());
-        } else {
-          _goTo(const RiderPendingScreen());
-        }
         return;
       }
 
@@ -404,31 +360,7 @@ class _SplashScreenState extends State<SplashScreen>
     } catch (e) {
       debugPrint('Splash navigate error: $e');
       if (!mounted) return;
-
-      final cachedRole = await _getCachedRole();
-      if (cachedRole == 'admin') {
-        _goTo(const AdminMainScreen());
-      } else if (cachedRole == 'rider') {
-        _goTo(const RiderDashboardScreen());
-      } else {
-        _goTo(const HomeScreen());
-      }
-    }
-  }
-
-  Future<void> _saveRoleCache(String role) async {
-    try {
-      final prefs = await SharedPreferences.getInstance();
-      await prefs.setString('user_role', role);
-    } catch (_) {}
-  }
-
-  Future<String> _getCachedRole() async {
-    try {
-      final prefs = await SharedPreferences.getInstance();
-      return prefs.getString('user_role') ?? 'customer';
-    } catch (_) {
-      return 'customer';
+      _goTo(const HomeScreen());
     }
   }
 
@@ -449,6 +381,7 @@ class _SplashScreenState extends State<SplashScreen>
 
   @override
   void dispose() {
+    CartVisibilityControl.show();
     _bgController.dispose();
     _logoController.dispose();
     _titleController.dispose();

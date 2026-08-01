@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:flutter/foundation.dart' show kIsWeb;
 import 'package:flutter/services.dart';
 import 'package:provider/provider.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
@@ -8,11 +9,14 @@ import 'package:shared_preferences/shared_preferences.dart';
 import 'constants/colors.dart';
 import 'providers/cart_provider.dart';
 import 'providers/user_provider.dart';
-import 'providers/rider_provider.dart';
+import 'providers/veg_filter_provider.dart';
 import 'screens/splash_screen.dart';
+import 'screens/home_screen.dart';
 import 'screens/reset_password_screen.dart';
 import 'services/notification_service.dart';
 import 'firebase_options.dart';
+import 'constants/globals.dart';
+import 'widgets/global_floating_cart.dart';
 import 'package:firebase_messaging/firebase_messaging.dart';
 import 'package:device_info_plus/device_info_plus.dart';
 
@@ -26,10 +30,12 @@ Future<void> main() async {
     ),
   );
 
-  await SystemChrome.setPreferredOrientations([
+  if (!kIsWeb) {
+    await SystemChrome.setPreferredOrientations([
     DeviceOrientation.portraitUp,
     DeviceOrientation.portraitDown,
-  ]);
+    ]);
+  }
 
   await dotenv.load(fileName: '.env');
 
@@ -46,13 +52,21 @@ Future<void> main() async {
       return [];
     },
   );
-  FirebaseMessaging.onBackgroundMessage(firebaseMessagingBackgroundHandler);
-  NotificationService().init().catchError((e) {
-    debugPrint('FCM init error: $e');
-  });
+  if (!kIsWeb) {
+    FirebaseMessaging.onBackgroundMessage(firebaseMessagingBackgroundHandler);
+    NotificationService().init().catchError((e) {
+      debugPrint('FCM init error: $e');
+    });
+    // 🆕 ADD — agar session already hai (purana login se), token fresh verify/save karo
+    // Isse FCM token kabhi silently stale nahi rahega, chahe user kabhi logout na kare
+    if (Supabase.instance.client.auth.currentSession != null) {
+      NotificationService().refreshTokenIfNeeded().catchError((e) {
+        debugPrint('FCM token refresh on app start error: $e');
+      });
+    }
+    await _checkAndRegisterDevice();
+  }
   SharedPreferences.getInstance();
-  // Device registration check
-  await _checkAndRegisterDevice();
   runApp(const StreetEatsApp());
 }
 
@@ -64,7 +78,6 @@ class StreetEatsApp extends StatefulWidget {
 }
 
 class _StreetEatsAppState extends State<StreetEatsApp> {
-  final _navigatorKey = GlobalKey<NavigatorState>();
 
   @override
   void initState() {
@@ -79,7 +92,7 @@ class _StreetEatsAppState extends State<StreetEatsApp> {
 
       if (event == AuthChangeEvent.passwordRecovery && session != null) {
         Future.delayed(const Duration(milliseconds: 300), () {
-          _navigatorKey.currentState?.push(
+          globalNavigatorKey.currentState?.push(
             MaterialPageRoute(
               builder: (_) => const ResetPasswordScreen(),
               fullscreenDialog: true,
@@ -102,12 +115,33 @@ class _StreetEatsAppState extends State<StreetEatsApp> {
           },
         ),
         ChangeNotifierProvider(create: (_) => UserProvider()),
-        ChangeNotifierProvider(create: (_) => RiderProvider()),
+        ChangeNotifierProvider(create: (_) => VegFilterProvider()),
       ],
       child: MaterialApp(
         title: 'Street Eats',
         debugShowCheckedModeBanner: false,
-        navigatorKey: _navigatorKey,
+        navigatorKey: globalNavigatorKey,
+        builder: (context, child) {
+          final constrainedChild = Center(
+            child: Container(
+              constraints: const BoxConstraints(maxWidth: 480),
+              decoration: BoxDecoration(
+                color: AppColors.background,
+                boxShadow: [
+                  if (MediaQuery.of(context).size.width > 480)
+                    const BoxShadow(
+                      color: Colors.black12,
+                      blurRadius: 15,
+                      spreadRadius: 5,
+                    ),
+                ],
+              ),
+              clipBehavior: Clip.antiAlias,
+              child: child!,
+            ),
+          );
+          return GlobalCartWrapper(child: constrainedChild);
+        },
         theme: ThemeData(
           fontFamily: 'Poppins',
           scaffoldBackgroundColor: AppColors.background,
@@ -146,7 +180,7 @@ class _StreetEatsAppState extends State<StreetEatsApp> {
             ),
           ),
         ),
-        home: const SplashScreen(),
+        home: kIsWeb ? const HomeScreen() : const SplashScreen(),
       ),
     );
   }

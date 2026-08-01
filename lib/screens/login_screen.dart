@@ -5,14 +5,9 @@ import 'package:provider/provider.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 import '../constants/colors.dart';
 import '../providers/user_provider.dart';
-import '../providers/rider_provider.dart';
 import '../services/auth_service.dart';
-import '../services/rider_service.dart';
 import '../services/notification_service.dart';
 import 'home_screen.dart';
-import 'admin/admin_main_screen.dart';
-import 'rider/rider_pending_screen.dart';
-import 'rider/rider_dashboard_screen.dart';
 import 'forgot_password_screen.dart';
 
 class LoginScreen extends StatefulWidget {
@@ -29,10 +24,9 @@ class _LoginScreenState extends State<LoginScreen>
   final _passwordController = TextEditingController();
   final _nameController = TextEditingController();
   final _phoneController = TextEditingController();
-  final _upiController = TextEditingController();
+  final _areaController = TextEditingController();
 
   final _authService = AuthService();
-  final _riderService = RiderService();
   final _notifService = NotificationService();
 
   late AnimationController _heroController;
@@ -48,10 +42,8 @@ class _LoginScreenState extends State<LoginScreen>
   bool _isGoogleLoading = false;
   bool _obscurePassword = true;
 
-  String _selectedRole = 'customer';
-  String _selectedArea = 'Haldwani';
+  final String _selectedArea = 'Haldwani';
   String _selectedGender = 'Male';
-  String _selectedVehicle = 'bike';
 
   final List<String> _areas = [
     'Haldwani',
@@ -65,11 +57,6 @@ class _LoginScreenState extends State<LoginScreen>
     'Sheetla Nagar',
   ];
   final List<String> _genders = ['Male', 'Female', 'Other'];
-  final Map<String, String> _vehicleLabels = {
-    'bike': '🏍️  Bike',
-    'scooty': '🛵  Scooty',
-    'cycle': '🚲  Cycle',
-  };
 
   @override
   void initState() {
@@ -117,7 +104,7 @@ class _LoginScreenState extends State<LoginScreen>
     _passwordController.dispose();
     _nameController.dispose();
     _phoneController.dispose();
-    _upiController.dispose();
+    _areaController.dispose();
     _heroController.dispose();
     _formController.dispose();
     super.dispose();
@@ -136,41 +123,19 @@ class _LoginScreenState extends State<LoginScreen>
 
   Future<void> _navigateByRole(String role) async {
     if (!mounted) return;
-    if (role == 'admin') {
-      Navigator.pushAndRemoveUntil(
-        context,
-        MaterialPageRoute(builder: (_) => const AdminMainScreen()),
-        (r) => false,
-      );
-    } else if (role == 'rider') {
-      await context.read<RiderProvider>().fetchRiderProfile();
-      if (!mounted) return;
-      final rider = context.read<RiderProvider>().rider;
-      Navigator.pushAndRemoveUntil(
-        context,
-        MaterialPageRoute(
-          builder: (_) => rider?.isApproved == true
-              ? const RiderDashboardScreen()
-              : const RiderPendingScreen(),
-        ),
-        (r) => false,
-      );
-    } else {
-      await context.read<UserProvider>().fetchUserData();
-      if (!mounted) return;
-      Navigator.pushAndRemoveUntil(
-        context,
-        MaterialPageRoute(builder: (_) => const HomeScreen()),
-        (r) => false,
-      );
-    }
+    await context.read<UserProvider>().fetchUserData();
+    if (!mounted) return;
+    Navigator.pushAndRemoveUntil(
+      context,
+      MaterialPageRoute(builder: (_) => const HomeScreen()),
+      (r) => false,
+    );
   }
 
   void _switchTab(bool isLogin) {
     HapticFeedback.selectionClick();
     setState(() {
       _isLogin = isLogin;
-      _selectedRole = 'customer';
     });
     _formController.reset();
     _formController.forward();
@@ -264,12 +229,6 @@ class _LoginScreenState extends State<LoginScreen>
   }
 
   Future<void> _handleGoogleSignIn() async {
-    if (!_isLogin && _selectedRole == 'rider') {
-      _showError(
-        'Rider account cannot be created with Google.\nPlease use email and password.',
-      );
-      return;
-    }
     setState(() => _isGoogleLoading = true);
     try {
       await _authService.signInWithGoogle();
@@ -306,56 +265,26 @@ class _LoginScreenState extends State<LoginScreen>
           await _notifService.refreshTokenAfterLogin();
         } catch (_) {}
       } else {
-        if (_selectedRole == 'customer') {
-          await _authService.signUp(
-            email: _emailController.text.trim(),
-            password: _passwordController.text.trim(),
-            fullName: _nameController.text.trim(),
-            phone: _phoneController.text.trim(),
-            area: _selectedArea,
-            gender: _selectedGender,
-          );
-          if (!mounted) return;
-          await context.read<UserProvider>().fetchUserData();
-          if (!mounted) return;
-          try {
-            await _notifService.refreshTokenAfterLogin();
-          } catch (_) {}
-          if (!mounted) return;
-          Navigator.pushAndRemoveUntil(
-            context,
-            MaterialPageRoute(builder: (_) => const HomeScreen()),
-            (r) => false,
-          );
-        } else {
-          await _authService.signUp(
-            email: _emailController.text.trim(),
-            password: _passwordController.text.trim(),
-            fullName: _nameController.text.trim(),
-            phone: _phoneController.text.trim(),
-            area: _selectedArea,
-            gender: 'Male',
-            role: 'rider',
-          );
-          await _riderService.createRiderProfile(
-            fullName: _nameController.text.trim(),
-            phone: _phoneController.text.trim(),
-            vehicleType: _selectedVehicle,
-            area: _selectedArea,
-            upiId: _upiController.text.trim().isEmpty
-                ? null
-                : _upiController.text.trim(),
-          );
-          if (!mounted) return;
-          Navigator.pushAndRemoveUntil(
-            context,
-            MaterialPageRoute(builder: (_) => const RiderPendingScreen()),
-            (r) => false,
-          );
-          try {
-            await _notifService.refreshTokenAfterLogin();
-          } catch (_) {}
-        }
+        await _authService.signUp(
+          email: _emailController.text.trim(),
+          password: _passwordController.text.trim(),
+          fullName: _nameController.text.trim(),
+          phone: _phoneController.text.trim(),
+          area: _areaController.text.trim(),
+          gender: _selectedGender,
+        );
+        if (!mounted) return;
+        await context.read<UserProvider>().fetchUserData();
+        if (!mounted) return;
+        try {
+          await _notifService.refreshTokenAfterLogin();
+        } catch (_) {}
+        if (!mounted) return;
+        Navigator.pushAndRemoveUntil(
+          context,
+          MaterialPageRoute(builder: (_) => const HomeScreen()),
+          (r) => false,
+        );
       }
     } catch (e) {
       if (!mounted) return;
@@ -399,21 +328,11 @@ class _LoginScreenState extends State<LoginScreen>
                           _buildTabToggle(),
                           const SizedBox(height: 24),
 
-                          // Sign up: role selector
-                          if (!_isLogin) ...[
-                            _lbl('I am a...'),
-                            const SizedBox(height: 10),
-                            _buildRoleSelector(),
-                            const SizedBox(height: 20),
-                          ],
-
-                          // Google button (not for rider signup)
-                          if (!(!_isLogin && _selectedRole == 'rider')) ...[
-                            _buildGoogleButton(),
-                            const SizedBox(height: 16),
-                            _buildDivider(),
-                            const SizedBox(height: 16),
-                          ],
+                          // Google button
+                          _buildGoogleButton(),
+                          const SizedBox(height: 16),
+                          _buildDivider(),
+                          const SizedBox(height: 16),
 
                           // Email
                           _lbl('Email Address'),
@@ -486,45 +405,22 @@ class _LoginScreenState extends State<LoginScreen>
                             const SizedBox(height: 16),
                             _lbl('Your Area'),
                             const SizedBox(height: 8),
-                            _drop(
-                              value: _selectedArea,
-                              items: _areas,
-                              onChange: (v) =>
-                                  setState(() => _selectedArea = v!),
+                            _field(
+                              controller: _areaController,
+                              hint: 'e.g. Tikonia, Haldwani',
+                              icon: Icons.location_on_outlined,
+                              validator: (v) =>
+                                  v!.isEmpty ? 'Area is required' : null,
                             ),
-                            if (_selectedRole == 'customer') ...[
-                              const SizedBox(height: 16),
-                              _lbl('Gender'),
-                              const SizedBox(height: 8),
-                              _drop(
-                                value: _selectedGender,
-                                items: _genders,
-                                onChange: (v) =>
-                                    setState(() => _selectedGender = v!),
-                              ),
-                            ],
-                            if (_selectedRole == 'rider') ...[
-                              const SizedBox(height: 16),
-                              _lbl('Vehicle Type'),
-                              const SizedBox(height: 8),
-                              _drop(
-                                value: _selectedVehicle,
-                                items: _vehicleLabels.keys.toList(),
-                                displayMap: _vehicleLabels,
-                                onChange: (v) =>
-                                    setState(() => _selectedVehicle = v!),
-                              ),
-                              const SizedBox(height: 16),
-                              _lbl('UPI ID (Optional)'),
-                              const SizedBox(height: 8),
-                              _field(
-                                controller: _upiController,
-                                hint: 'yourname@upi',
-                                icon: Icons.account_balance_wallet_outlined,
-                              ),
-                              const SizedBox(height: 12),
-                              _buildRiderInfoBanner(),
-                            ],
+                            const SizedBox(height: 16),
+                            _lbl('Gender'),
+                            const SizedBox(height: 8),
+                            _drop(
+                              value: _selectedGender,
+                              items: _genders,
+                              onChange: (v) =>
+                                  setState(() => _selectedGender = v!),
+                            ),
                           ],
 
                           const SizedBox(height: 28),
@@ -669,127 +565,6 @@ class _LoginScreenState extends State<LoginScreen>
   }
 
   // ─────────────────────────────────────────────────────────────
-  // ROLE SELECTOR
-  // ─────────────────────────────────────────────────────────────
-  Widget _buildRoleSelector() {
-    return Row(
-      children: [
-        Expanded(
-          child: _roleCard(
-            icon: Icons.person_outline_rounded,
-            label: 'Customer',
-            sub: 'Order food',
-            value: 'customer',
-          ),
-        ),
-        const SizedBox(width: 12),
-        Expanded(
-          child: _roleCard(
-            icon: Icons.delivery_dining_rounded,
-            label: 'Rider',
-            sub: 'Deliver food',
-            value: 'rider',
-          ),
-        ),
-      ],
-    );
-  }
-
-  Widget _roleCard({
-    required IconData icon,
-    required String label,
-    required String sub,
-    required String value,
-  }) {
-    final sel = _selectedRole == value;
-    return GestureDetector(
-      onTap: () {
-        HapticFeedback.selectionClick();
-        setState(() => _selectedRole = value);
-      },
-      child: AnimatedContainer(
-        duration: const Duration(milliseconds: 220),
-        padding: const EdgeInsets.symmetric(vertical: 18),
-        decoration: BoxDecoration(
-          color: sel ? AppColors.primary.withOpacity(0.06) : AppColors.surface,
-          borderRadius: BorderRadius.circular(16),
-          border: Border.all(
-            color: sel ? AppColors.primary : AppColors.border,
-            width: sel ? 2 : 1,
-          ),
-          boxShadow: sel
-              ? [
-                  BoxShadow(
-                    color: AppColors.primary.withOpacity(0.12),
-                    blurRadius: 12,
-                    offset: const Offset(0, 4),
-                  ),
-                ]
-              : [],
-        ),
-        child: Column(
-          children: [
-            // Checkmark badge for selected
-            Stack(
-              alignment: Alignment.topRight,
-              children: [
-                Container(
-                  width: 48,
-                  height: 48,
-                  decoration: BoxDecoration(
-                    color: sel
-                        ? AppColors.primary.withOpacity(0.1)
-                        : AppColors.border.withOpacity(0.4),
-                    shape: BoxShape.circle,
-                  ),
-                  child: Icon(
-                    icon,
-                    color: sel ? AppColors.primary : AppColors.textMuted,
-                    size: 24,
-                  ),
-                ),
-                if (sel)
-                  Container(
-                    width: 18,
-                    height: 18,
-                    decoration: const BoxDecoration(
-                      color: AppColors.primary,
-                      shape: BoxShape.circle,
-                    ),
-                    child: const Icon(
-                      Icons.check_rounded,
-                      color: Colors.white,
-                      size: 12,
-                    ),
-                  ),
-              ],
-            ),
-            const SizedBox(height: 8),
-            Text(
-              label,
-              style: TextStyle(
-                fontSize: 14,
-                fontWeight: FontWeight.w700,
-                fontFamily: 'Poppins',
-                color: sel ? AppColors.primary : AppColors.textPrimary,
-              ),
-            ),
-            const SizedBox(height: 2),
-            Text(
-              sub,
-              style: const TextStyle(
-                fontSize: 11,
-                color: AppColors.textMuted,
-                fontFamily: 'Poppins',
-              ),
-            ),
-          ],
-        ),
-      ),
-    );
-  }
-
-  // ─────────────────────────────────────────────────────────────
   // GOOGLE BUTTON
   // ─────────────────────────────────────────────────────────────
   Widget _buildGoogleButton() {
@@ -918,42 +693,6 @@ class _LoginScreenState extends State<LoginScreen>
         focusedBorder: _bdr(focused: true),
         errorBorder: _bdr(error: true),
         focusedErrorBorder: _bdr(error: true),
-      ),
-    );
-  }
-
-  // ─────────────────────────────────────────────────────────────
-  // RIDER INFO BANNER
-  // ─────────────────────────────────────────────────────────────
-  Widget _buildRiderInfoBanner() {
-    return Container(
-      padding: const EdgeInsets.all(14),
-      decoration: BoxDecoration(
-        color: AppColors.primary.withOpacity(0.06),
-        borderRadius: BorderRadius.circular(12),
-        border: Border.all(color: AppColors.primary.withOpacity(0.2)),
-      ),
-      child: Row(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          const Icon(
-            Icons.info_outline_rounded,
-            color: AppColors.primary,
-            size: 16,
-          ),
-          const SizedBox(width: 10),
-          Expanded(
-            child: Text(
-              'Your application will be reviewed by our team. Approval takes 24–48 hours.',
-              style: TextStyle(
-                fontSize: 12,
-                color: AppColors.primary.withOpacity(0.85),
-                fontFamily: 'Poppins',
-                height: 1.55,
-              ),
-            ),
-          ),
-        ],
       ),
     );
   }

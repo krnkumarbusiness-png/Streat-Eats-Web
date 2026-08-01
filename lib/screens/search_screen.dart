@@ -1,56 +1,20 @@
-// lib/screens/search_screen.dart
-// v3.2 — FIXED
-// ✅ Sweet vendors bhi search mein aate hain — alag '🍬 Sweets' tag
-// ✅ Filter chips: All, Vendors, Items (Vendors mein sweet + street + restaurant sab)
-// ✅ Sweet vendors ke liye alag badge styling
-// ✅ SearchScreen ab sweetVendors bhi accept karta hai
-
+import 'dart:async';
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
+import 'package:provider/provider.dart';
+import 'package:supabase_flutter/supabase_flutter.dart';
+import 'package:cached_network_image/cached_network_image.dart';
+import 'package:shimmer/shimmer.dart';
 import '../constants/colors.dart';
 import '../constants/styles.dart';
 import '../models/vendor_model.dart';
 import '../models/menu_item_model.dart';
-import 'vendor_detail_screen.dart';
-import 'restaurant_detail_screen.dart';
-import 'menu_item_detail_screen.dart';
+import '../providers/veg_filter_provider.dart';
+import '../utils/cart_utils.dart';
+import '../screens/menu_item_detail_screen.dart';
 
-// ─────────────────────────────────────────
-// Sealed class — type-safe search results
-// ─────────────────────────────────────────
-sealed class SearchResult {
-  const SearchResult();
-}
-
-class VendorResult extends SearchResult {
-  final VendorModel vendor;
-  const VendorResult(this.vendor);
-}
-
-class ItemResult extends SearchResult {
-  final MenuItemModel item;
-  final VendorModel vendor;
-  const ItemResult({required this.item, required this.vendor});
-}
-
-// ─────────────────────────────────────────
-// SearchScreen
-// ─────────────────────────────────────────
 class SearchScreen extends StatefulWidget {
-  final List<VendorModel> vendors;
-  final List<VendorModel> restaurants;
-
-  // ✅ FIX: Sweet vendors ka naya parameter
-  final List<VendorModel> sweetVendors;
-
-  final Map<String, List<MenuItemModel>> vendorMenuItems;
-
-  const SearchScreen({
-    super.key,
-    required this.vendors,
-    this.restaurants = const [],
-    this.sweetVendors = const [], // ✅ Default empty — backward compatible
-    this.vendorMenuItems = const {},
-  });
+  const SearchScreen({super.key});
 
   @override
   State<SearchScreen> createState() => _SearchScreenState();
@@ -59,59 +23,23 @@ class SearchScreen extends StatefulWidget {
 class _SearchScreenState extends State<SearchScreen> {
   final _searchController = TextEditingController();
   final _focusNode = FocusNode();
-
-  List<SearchResult> _results = [];
+  final _supabase = Supabase.instance.client;
+  
+  Timer? _debounce;
   String _query = '';
-  String _activeFilter = 'Items';
-
-  // ✅ FIX: Teeno types ke vendors ek saath — street + restaurant + sweets
-  List<VendorModel> get _allVendors => [
-    ...widget.vendors,
-    ...widget.restaurants,
-    ...widget.sweetVendors, // ✅ Sweet vendors included
-  ];
-
-  List<ItemResult> get _allItemResults {
-    final results = <ItemResult>[];
-    for (final vendor in _allVendors) {
-      final items = widget.vendorMenuItems[vendor.id] ?? [];
-      for (final item in items) {
-        results.add(ItemResult(item: item, vendor: vendor));
-      }
-    }
-    return results;
-  }
+  bool _isLoading = false;
+  
+  List<MenuItemModel> _searchResults = [];
+  Map<String, VendorModel> _vendorMap = {};
 
   final List<String> _recentSearches = [];
-
   final List<String> _popularSearches = [
-    'Momos',
-    'Burger',
-    'Chowmein',
-    'Pizza',
-    'Maggi',
-    'Chaat',
-    'Shake',
-    'Sandwich',
-    'Barfi', // ✅ Sweet categories bhi
-    'Halwa',
-    'Cake',
+    'Momos', 'Burger', 'Chowmein', 'Pizza', 'Maggi', 'Chaat', 'Shake', 'Sandwich', 'Barfi', 'Halwa', 'Cake'
   ];
-
   final Map<String, String> _categoryEmojis = {
-    'Momos': '🥟',
-    'Burger': '🍔',
-    'Chowmein': '🍜',
-    'Pizza': '🍕',
-    'Chaat': '🍛',
-    'Maggi': '🍝',
-    'Sandwich': '🥪',
-    'Shake': '🥤',
-    'Samosa': '🥘',
-    'Barfi': '🍬', // ✅
-    'Halwa': '🍮', // ✅
-    'Cake': '🎂', // ✅
-    'Other': '🍽️',
+    'Momos': '🥟', 'Burger': '🍔', 'Chowmein': '🍜', 'Pizza': '🍕',
+    'Chaat': '🍛', 'Maggi': '🍝', 'Sandwich': '🥪', 'Shake': '🥤',
+    'Barfi': '🍬', 'Halwa': '🍮', 'Cake': '🎂', 'Other': '🍽️',
   };
 
   @override
@@ -126,75 +54,103 @@ class _SearchScreenState extends State<SearchScreen> {
   void dispose() {
     _searchController.dispose();
     _focusNode.dispose();
+    _debounce?.cancel();
     super.dispose();
   }
 
-  // ─────────────────────────────────────────
-  // Core Search Logic
-  // ─────────────────────────────────────────
-  void _onSearch(String query) {
+  void _onSearchChanged(String query) {
+    if (_debounce?.isActive ?? false) _debounce!.cancel();
+    
     setState(() {
       _query = query.trim();
-      _activeFilter = 'Items';
-      if (_query.isEmpty) {
-        _results = [];
-        return;
-      }
-
-      final q = _query.toLowerCase();
-      final results = <SearchResult>[];
-
-      // 1️⃣ Menu item search — PEHLE items
-      for (final itemResult in _allItemResults) {
-        final item = itemResult.item;
-        if (item.name.toLowerCase().contains(q) ||
-            item.description.toLowerCase().contains(q) ||
-            item.category.toLowerCase().contains(q) ||
-            (item.tag?.toLowerCase().contains(q) ?? false) ||
-            (item.suggestedCategory?.toLowerCase().contains(q) ?? false)) {
-          results.add(itemResult);
-        }
-      }
-
-      // 2️⃣ Vendor search — BAAD MEIN
-      for (final vendor in _allVendors) {
-        if (vendor.name.toLowerCase().contains(q) ||
-            vendor.category.toLowerCase().contains(q) ||
-            vendor.area.toLowerCase().contains(q) ||
-            (vendor.cuisineType?.toLowerCase().contains(q) ?? false) ||
-            (vendor.chaupatiName?.toLowerCase().contains(q) ?? false) ||
-            // ✅ Sweet vendors ke liye business_type bhi check karo
-            // ✅ Sweet vendors ke liye bhi check karo
-            vendor.businessType.toLowerCase().contains(q) ||
-            (vendor.specialtyCategory?.toLowerCase().contains(q) ?? false)) {
-          results.add(VendorResult(vendor));
-        }
-      }
-
-      _results = results;
+    });
+    
+    if (_query.isEmpty) {
+      setState(() {
+        _searchResults = [];
+        _vendorMap = {};
+        _isLoading = false;
+      });
+      return;
+    }
+    
+    _debounce = Timer(const Duration(milliseconds: 400), () {
+      _performSearch(_query);
     });
   }
-
-  List<SearchResult> get _filteredResults {
-    switch (_activeFilter) {
-      case 'Vendors':
-        return _results.whereType<VendorResult>().toList();
-      case 'Items':
-        return _results.whereType<ItemResult>().toList();
-      default:
-        return _results;
+  
+  Future<void> _performSearch(String query) async {
+    if (query.isEmpty) return;
+    
+    setState(() {
+      _isLoading = true;
+      _searchResults = [];
+      _vendorMap = {};
+    });
+    
+    try {
+      // 1. Search menu_items using .ilike
+      final itemsData = await _supabase
+          .from('menu_items')
+          .select()
+          .ilike('name', '%$query%')
+          .eq('is_available', true);
+          
+      final items = (itemsData as List)
+          .map((item) => MenuItemModel.fromMap(item as Map<String, dynamic>))
+          .toList();
+          
+      if (items.isEmpty) {
+        if (mounted) {
+          setState(() {
+            _isLoading = false;
+            _searchResults = [];
+          });
+        }
+        return;
+      }
+      
+      // 2. Fetch unique vendors
+      final vendorIds = items.map((i) => i.vendorId).toSet().toList();
+      
+      final vendorsData = await _supabase
+          .from('vendors')
+          .select()
+          .inFilter('id', vendorIds)
+          .eq('is_active', true);
+          
+      final vendorMap = <String, VendorModel>{};
+      for (final v in vendorsData) {
+        final vendor = VendorModel.fromMap(v as Map<String, dynamic>);
+        vendorMap[vendor.id] = vendor;
+      }
+      
+      // Filter out items whose vendors are not active
+      final validItems = items.where((i) => vendorMap.containsKey(i.vendorId)).toList();
+      
+      if (mounted) {
+        setState(() {
+          _searchResults = validItems;
+          _vendorMap = vendorMap;
+          _isLoading = false;
+        });
+      }
+    } catch (e) {
+      debugPrint('Search error: $e');
+      if (mounted) {
+        setState(() {
+          _isLoading = false;
+        });
+      }
     }
   }
-
-  int get _vendorCount => _results.whereType<VendorResult>().length;
-  int get _itemCount => _results.whereType<ItemResult>().length;
 
   void _onSuggestionTap(String suggestion) {
     _searchController.text = suggestion;
     _searchController.selection = TextSelection.fromPosition(
       TextPosition(offset: suggestion.length),
     );
-    _onSearch(suggestion);
+    _onSearchChanged(suggestion);
     if (!_recentSearches.contains(suggestion)) {
       setState(() => _recentSearches.insert(0, suggestion));
     }
@@ -211,52 +167,33 @@ class _SearchScreenState extends State<SearchScreen> {
     _searchController.clear();
     setState(() {
       _query = '';
-      _results = [];
-      _activeFilter = 'Items';
+      _searchResults = [];
+      _vendorMap = {};
     });
     _focusNode.requestFocus();
   }
 
-  void _onVendorTap(VendorModel vendor) {
-    if (!_recentSearches.contains(vendor.name)) {
-      setState(() => _recentSearches.insert(0, vendor.name));
-    }
-    // ✅ Sweet vendor ke liye bhi VendorDetailScreen (ya alag SweetVendorDetailScreen agar baad mein banao)
-    if (vendor.isRestaurant) {
-      Navigator.push(
-        context,
-        MaterialPageRoute(
-          builder: (_) => RestaurantDetailScreen(vendor: vendor),
-        ),
-      );
-    } else {
-      Navigator.push(
-        context,
-        MaterialPageRoute(builder: (_) => VendorDetailScreen(vendor: vendor)),
-      );
-    }
-  }
-
-  void _onItemTap(ItemResult itemResult) {
-    if (!_recentSearches.contains(itemResult.item.name)) {
-      setState(() => _recentSearches.insert(0, itemResult.item.name));
-    }
+  Future<void> _onItemTap(MenuItemModel item) async {
+    final vendor = _vendorMap[item.vendorId];
+    if (vendor == null) return;
+    HapticFeedback.lightImpact();
     Navigator.push(
       context,
       MaterialPageRoute(
-        builder: (_) => MenuItemDetailScreen(
-          item: itemResult.item,
-          vendor: itemResult.vendor,
-        ),
+        builder: (_) => MenuItemDetailScreen(item: item, vendor: vendor),
       ),
     );
   }
 
-  // ─────────────────────────────────────────
-  // Build
-  // ─────────────────────────────────────────
   @override
   Widget build(BuildContext context) {
+    final isVegOnly = context.watch<VegFilterProvider>().isVegOnly;
+    
+    List<MenuItemModel> displayItems = _searchResults;
+    if (isVegOnly) {
+      displayItems = displayItems.where((item) => item.isVeg).toList();
+    }
+
     return Scaffold(
       backgroundColor: AppColors.background,
       body: SafeArea(
@@ -267,7 +204,7 @@ class _SearchScreenState extends State<SearchScreen> {
             Expanded(
               child: _query.isEmpty
                   ? _buildSuggestionsView()
-                  : _buildResultsView(),
+                  : _buildResultsView(displayItems, isVegOnly),
             ),
           ],
         ),
@@ -275,9 +212,6 @@ class _SearchScreenState extends State<SearchScreen> {
     );
   }
 
-  // ─────────────────────────────────────────
-  // Search Header
-  // ─────────────────────────────────────────
   Widget _buildSearchHeader() {
     return Container(
       color: AppColors.surface,
@@ -317,7 +251,7 @@ class _SearchScreenState extends State<SearchScreen> {
               child: TextField(
                 controller: _searchController,
                 focusNode: _focusNode,
-                onChanged: _onSearch,
+                onChanged: _onSearchChanged,
                 onSubmitted: _onSubmit,
                 textInputAction: TextInputAction.search,
                 style: const TextStyle(
@@ -362,9 +296,6 @@ class _SearchScreenState extends State<SearchScreen> {
     );
   }
 
-  // ─────────────────────────────────────────
-  // Suggestions View
-  // ─────────────────────────────────────────
   Widget _buildSuggestionsView() {
     return SingleChildScrollView(
       physics: const BouncingScrollPhysics(),
@@ -395,7 +326,6 @@ class _SearchScreenState extends State<SearchScreen> {
             ...(_recentSearches.take(5).map((s) => _recentItem(s))),
             const SizedBox(height: 20),
           ],
-
           const Text('Popular Categories', style: AppStyles.sectionHeader),
           const SizedBox(height: 12),
           GridView.builder(
@@ -444,33 +374,6 @@ class _SearchScreenState extends State<SearchScreen> {
               );
             },
           ),
-          const SizedBox(height: 24),
-
-          Row(
-            children: [
-              const Expanded(
-                child: Text('All Vendors', style: AppStyles.sectionHeader),
-              ),
-              Container(
-                padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
-                decoration: BoxDecoration(
-                  color: AppColors.primary.withOpacity(0.1),
-                  borderRadius: BorderRadius.circular(20),
-                ),
-                child: Text(
-                  '${_allVendors.length} total',
-                  style: const TextStyle(
-                    fontSize: 11,
-                    color: AppColors.primary,
-                    fontWeight: FontWeight.w600,
-                    fontFamily: 'Poppins',
-                  ),
-                ),
-              ),
-            ],
-          ),
-          const SizedBox(height: 12),
-          ..._allVendors.map((v) => _vendorListItem(VendorResult(v))),
         ],
       ),
     );
@@ -489,11 +392,7 @@ class _SearchScreenState extends State<SearchScreen> {
         ),
         child: Row(
           children: [
-            const Icon(
-              Icons.history_rounded,
-              color: AppColors.textMuted,
-              size: 16,
-            ),
+            const Icon(Icons.history_rounded, color: AppColors.textMuted, size: 16),
             const SizedBox(width: 12),
             Expanded(
               child: Text(
@@ -508,11 +407,7 @@ class _SearchScreenState extends State<SearchScreen> {
             ),
             GestureDetector(
               onTap: () => setState(() => _recentSearches.remove(text)),
-              child: const Icon(
-                Icons.close_rounded,
-                color: AppColors.textMuted,
-                size: 14,
-              ),
+              child: const Icon(Icons.close_rounded, color: AppColors.textMuted, size: 14),
             ),
           ],
         ),
@@ -520,687 +415,227 @@ class _SearchScreenState extends State<SearchScreen> {
     );
   }
 
-  // ─────────────────────────────────────────
-  // Results View
-  // ─────────────────────────────────────────
-  Widget _buildResultsView() {
-    final filtered = _filteredResults;
+  Widget _buildResultsView(List<MenuItemModel> displayItems, bool isVegOnly) {
+    if (_isLoading) {
+      return ListView.separated(
+        padding: const EdgeInsets.all(16),
+        itemCount: 5,
+        separatorBuilder: (_, __) => const SizedBox(height: 12),
+        itemBuilder: (_, __) => Shimmer.fromColors(
+          baseColor: const Color(0xFFE5E7EB),
+          highlightColor: const Color(0xFFFFF8F0),
+          child: Container(
+            height: 100,
+            decoration: BoxDecoration(
+              color: Colors.white,
+              borderRadius: BorderRadius.circular(12),
+            ),
+          ),
+        ),
+      );
+    }
+
+    if (displayItems.isEmpty) {
+      return Center(
+        child: Padding(
+          padding: const EdgeInsets.all(32),
+          child: Column(
+            mainAxisAlignment: MainAxisAlignment.center,
+            children: [
+              Container(
+                width: 80,
+                height: 80,
+                decoration: BoxDecoration(
+                  color: const Color(0xFFFFF1EB),
+                  shape: BoxShape.circle,
+                  border: Border.all(color: AppColors.primary.withOpacity(0.2)),
+                ),
+                child: const Center(
+                  child: Text('🔍', style: TextStyle(fontSize: 32)),
+                ),
+              ),
+              const SizedBox(height: 16),
+              const Text(
+                'No items found for your search',
+                style: AppStyles.sectionHeader,
+                textAlign: TextAlign.center,
+              ),
+            ],
+          ),
+        ),
+      );
+    }
 
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
-        if (_results.isNotEmpty)
-          Container(
-            height: 40,
-            color: AppColors.surface,
-            child: ListView(
-              scrollDirection: Axis.horizontal,
-              padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 6),
-              children: [
-                _filterChip('All', _results.length),
-                const SizedBox(width: 8),
-                _filterChip('Vendors', _vendorCount),
-                const SizedBox(width: 8),
-                _filterChip('Items', _itemCount),
-              ],
-            ),
-          ),
-
-        Padding(
-          padding: const EdgeInsets.fromLTRB(16, 10, 16, 6),
-          child: Text(
-            '${filtered.length} result${filtered.length == 1 ? '' : 's'} for "$_query"',
-            style: const TextStyle(
-              fontSize: 13,
-              color: AppColors.textMuted,
-              fontFamily: 'Poppins',
-              fontWeight: FontWeight.w500,
-            ),
-          ),
-        ),
-
-        Expanded(
-          child: filtered.isEmpty
-              ? _buildEmptyState()
-              : ListView.separated(
-                  physics: const BouncingScrollPhysics(),
-                  padding: const EdgeInsets.fromLTRB(16, 0, 16, 32),
-                  itemCount: filtered.length,
-                  separatorBuilder: (_, __) => const SizedBox(height: 10),
-                  itemBuilder: (_, i) {
-                    final result = filtered[i];
-                    return switch (result) {
-                      VendorResult r => _vendorListItem(r),
-                      ItemResult r => _itemListItem(r),
-                    };
-                  },
+        if (isVegOnly)
+          Padding(
+            padding: const EdgeInsets.fromLTRB(16, 12, 16, 4),
+            child: Container(
+              padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+              decoration: BoxDecoration(
+                color: const Color(0xFF16A34A).withOpacity(0.1),
+                borderRadius: BorderRadius.circular(20),
+                border: Border.all(color: const Color(0xFF16A34A).withOpacity(0.3)),
+              ),
+              child: const Text(
+                'Showing veg items only',
+                style: TextStyle(
+                  color: Color(0xFF16A34A),
+                  fontSize: 11,
+                  fontWeight: FontWeight.w600,
+                  fontFamily: 'Poppins',
                 ),
+              ),
+            ),
+          ),
+        Expanded(
+          child: ListView.separated(
+            physics: const BouncingScrollPhysics(),
+            padding: EdgeInsets.fromLTRB(16, isVegOnly ? 8 : 12, 16, 32),
+            itemCount: displayItems.length,
+            separatorBuilder: (_, __) => const SizedBox(height: 12),
+            itemBuilder: (_, i) {
+              final item = displayItems[i];
+              final vendor = _vendorMap[item.vendorId];
+              if (vendor == null) return const SizedBox.shrink();
+
+              return _buildItemCard(item, vendor);
+            },
+          ),
         ),
       ],
     );
   }
 
-  Widget _filterChip(String label, int count) {
-    final isActive = _activeFilter == label;
+  Widget _buildItemCard(MenuItemModel item, VendorModel vendor) {
     return GestureDetector(
-      onTap: () => setState(() => _activeFilter = label),
-      child: AnimatedContainer(
-        duration: const Duration(milliseconds: 200),
-        padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 4),
-        decoration: BoxDecoration(
-          color: isActive
-              ? AppColors.primary
-              : AppColors.primary.withOpacity(0.08),
-          borderRadius: BorderRadius.circular(20),
-          border: Border.all(
-            color: isActive
-                ? AppColors.primary
-                : AppColors.primary.withOpacity(0.25),
-          ),
-        ),
-        child: Text(
-          '$label ($count)',
-          style: TextStyle(
-            fontSize: 12,
-            fontWeight: FontWeight.w600,
-            color: isActive ? Colors.white : AppColors.primary,
-            fontFamily: 'Poppins',
-          ),
-        ),
+      onTap: () => _onItemTap(item),
+      child: Container(
+      padding: const EdgeInsets.all(12),
+      decoration: BoxDecoration(
+        color: AppColors.surface,
+        borderRadius: BorderRadius.circular(16),
+        border: Border.all(color: AppColors.border),
       ),
-    );
-  }
-
-  Widget _buildEmptyState() {
-    return Center(
-      child: Padding(
-        padding: const EdgeInsets.all(32),
-        child: Column(
-          mainAxisAlignment: MainAxisAlignment.center,
-          children: [
-            Container(
-              width: 80,
-              height: 80,
-              decoration: BoxDecoration(
-                color: AppColors.surfaceWarm,
-                shape: BoxShape.circle,
-                border: Border.all(color: AppColors.primary.withOpacity(0.2)),
-              ),
-              child: const Center(
-                child: Text('🔍', style: TextStyle(fontSize: 32)),
-              ),
-            ),
-            const SizedBox(height: 16),
-            Text(
-              'No results for "$_query"',
-              style: AppStyles.sectionHeader,
-              textAlign: TextAlign.center,
-            ),
-            const SizedBox(height: 8),
-            const Text(
-              'Try a different keyword\nor browse by category',
-              style: TextStyle(
-                color: AppColors.textMuted,
-                fontSize: 13,
-                height: 1.5,
-                fontFamily: 'Poppins',
-              ),
-              textAlign: TextAlign.center,
-            ),
-            const SizedBox(height: 20),
-            Wrap(
-              spacing: 8,
-              runSpacing: 8,
-              alignment: WrapAlignment.center,
-              children: _popularSearches.take(6).map((s) {
-                return GestureDetector(
-                  onTap: () => _onSuggestionTap(s),
-                  child: Container(
-                    padding: const EdgeInsets.symmetric(
-                      horizontal: 14,
-                      vertical: 8,
+      child: Row(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          // Left: Image
+          ClipRRect(
+            borderRadius: BorderRadius.circular(12),
+            child: item.imageUrl != null && item.imageUrl!.isNotEmpty
+                ? CachedNetworkImage(
+                    imageUrl: item.imageUrl!,
+                    width: 80,
+                    height: 80,
+                    fit: BoxFit.cover,
+                    placeholder: (_, __) => Container(
+                      width: 80,
+                      height: 80,
+                      color: Colors.grey[200],
                     ),
-                    decoration: BoxDecoration(
-                      color: AppColors.primary.withOpacity(0.08),
-                      borderRadius: BorderRadius.circular(20),
-                      border: Border.all(
-                        color: AppColors.primary.withOpacity(0.25),
+                    errorWidget: (_, __, ___) => Container(
+                      width: 80,
+                      height: 80,
+                      color: Colors.grey[200],
+                      child: const Icon(Icons.fastfood, color: Colors.grey),
+                    ),
+                  )
+                : Container(
+                    width: 80,
+                    height: 80,
+                    color: Colors.grey[200],
+                    child: const Icon(Icons.fastfood, color: Colors.grey),
+                  ),
+          ),
+          const SizedBox(width: 12),
+          // Middle: Details
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Row(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Container(
+                      margin: const EdgeInsets.only(top: 4, right: 6),
+                      width: 8,
+                      height: 8,
+                      decoration: BoxDecoration(
+                        color: item.isVeg ? const Color(0xFF16A34A) : const Color(0xFFDC2626),
+                        shape: BoxShape.circle,
                       ),
                     ),
-                    child: Text(
-                      '${_categoryEmojis[s] ?? '🍽️'} $s',
+                    Expanded(
+                      child: Text(
+                        item.name,
+                        style: const TextStyle(
+                          fontSize: 14,
+                          fontWeight: FontWeight.bold,
+                          color: AppColors.textPrimary,
+                          fontFamily: 'Poppins',
+                        ),
+                        maxLines: 2,
+                        overflow: TextOverflow.ellipsis,
+                      ),
+                    ),
+                  ],
+                ),
+                const SizedBox(height: 4),
+                Text(
+                  vendor.name,
+                  style: const TextStyle(
+                    fontSize: 12,
+                    color: AppColors.textMuted,
+                    fontFamily: 'Poppins',
+                  ),
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                ),
+                const SizedBox(height: 8),
+                Row(
+                  mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                  children: [
+                    Text(
+                      '₹${item.appPrice.toStringAsFixed(0)}',
                       style: const TextStyle(
-                        fontSize: 12,
-                        fontWeight: FontWeight.w600,
+                        fontSize: 15,
+                        fontWeight: FontWeight.w700,
                         color: AppColors.primary,
                         fontFamily: 'Poppins',
                       ),
                     ),
-                  ),
-                );
-              }).toList(),
-            ),
-          ],
-        ),
-      ),
-    );
-  }
-
-  // ─────────────────────────────────────────
-  // ✅ Vendor Card — sweet vendors ka alag badge
-  // ─────────────────────────────────────────
-  Widget _vendorListItem(VendorResult result) {
-    final vendor = result.vendor;
-    final isOpen = vendor.isActive;
-    final statusColor = isOpen ? AppColors.success : AppColors.error;
-
-    // ✅ Vendor type determine karo — badge styling ke liye
-    final isSweet = vendor.businessType == 'sweets';
-    final isRestaurant = vendor.isRestaurant;
-
-    // Badge text + colors
-    final String badgeText;
-    final Color badgeBg;
-    final Color badgeFg;
-
-    if (isSweet) {
-      badgeText = '🍬 Sweets';
-      badgeBg = const Color(0xFFFFF1EB);
-      badgeFg = const Color(0xFFFF6B2B);
-    } else if (isRestaurant) {
-      badgeText = '🍽️ Restaurant';
-      badgeBg = const Color(0xFFEFF6FF);
-      badgeFg = const Color(0xFF2563EB);
-    } else {
-      badgeText = '🥟 Street Food';
-      badgeBg = const Color(0xFFFFF1EB);
-      badgeFg = AppColors.primary;
-    }
-
-    return GestureDetector(
-      onTap: () => _onVendorTap(vendor),
-      child: Container(
-        padding: const EdgeInsets.all(14),
-        decoration: BoxDecoration(
-          color: AppColors.surface,
-          borderRadius: BorderRadius.circular(14),
-          border: Border.all(color: AppColors.border),
-        ),
-        child: Row(
-          children: [
-            // Vendor image
-            ClipRRect(
-              borderRadius: BorderRadius.circular(12),
-              child: vendor.imageUrl != null
-                  ? Image.network(
-                      vendor.imageUrl!,
-                      width: 52,
-                      height: 52,
-                      fit: BoxFit.cover,
-                      errorBuilder: (_, __, ___) =>
-                          _vendorPlaceholder(vendor, isSweet),
-                    )
-                  : _vendorPlaceholder(vendor, isSweet),
-            ),
-            const SizedBox(width: 12),
-
-            Expanded(
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  // Name + badge
-                  Row(
-                    children: [
-                      Expanded(
-                        child: Text(
-                          vendor.name,
-                          style: AppStyles.cardTitle,
-                          maxLines: 1,
-                          overflow: TextOverflow.ellipsis,
+                    GestureDetector(
+                      onTap: () {
+                        CartUtils.handleCartAddItem(context, item, vendor);
+                      },
+                      child: Container(
+                        padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 6),
+                        decoration: BoxDecoration(
+                          color: AppColors.primary.withOpacity(0.1),
+                          borderRadius: BorderRadius.circular(8),
+                          border: Border.all(color: AppColors.primary.withOpacity(0.3)),
                         ),
-                      ),
-                      if (vendor.vendorBadge != null) ...[
-                        const SizedBox(width: 6),
-                        Container(
-                          padding: const EdgeInsets.symmetric(
-                            horizontal: 6,
-                            vertical: 2,
-                          ),
-                          decoration: BoxDecoration(
-                            color: AppColors.accent.withOpacity(0.15),
-                            borderRadius: BorderRadius.circular(4),
-                          ),
-                          child: Text(
-                            vendor.vendorBadge!,
-                            style: const TextStyle(
-                              fontSize: 9,
-                              fontWeight: FontWeight.w700,
-                              color: AppColors.accent,
-                              fontFamily: 'Poppins',
-                            ),
-                          ),
-                        ),
-                      ],
-                    ],
-                  ),
-                  const SizedBox(height: 3),
-
-                  // Area + distance
-                  Row(
-                    children: [
-                      const Icon(
-                        Icons.location_on_outlined,
-                        size: 11,
-                        color: AppColors.textMuted,
-                      ),
-                      const SizedBox(width: 3),
-                      Expanded(
-                        child: Text(
-                          vendor.area,
-                          style: const TextStyle(
-                            fontSize: 11,
-                            color: AppColors.textMuted,
-                            fontFamily: 'Poppins',
-                          ),
-                          maxLines: 1,
-                          overflow: TextOverflow.ellipsis,
-                        ),
-                      ),
-                      if (vendor.distanceKm != null) ...[
-                        const Text(
-                          ' · ',
+                        child: const Text(
+                          'ADD',
                           style: TextStyle(
-                            color: AppColors.textMuted,
-                            fontSize: 11,
-                          ),
-                        ),
-                        Text(
-                          '${vendor.distanceKm!.toStringAsFixed(1)} km',
-                          style: const TextStyle(
-                            fontSize: 11,
-                            color: AppColors.textMuted,
+                            color: AppColors.primary,
+                            fontSize: 12,
+                            fontWeight: FontWeight.bold,
                             fontFamily: 'Poppins',
                           ),
                         ),
-                      ],
-                    ],
-                  ),
-                  const SizedBox(height: 5),
-
-                  // Tags row
-                  Row(
-                    children: [
-                      _smallTag(
-                        vendor.category.split(',').first.trim(),
-                        AppColors.primary.withOpacity(0.08),
-                        AppColors.primary,
                       ),
-                      const SizedBox(width: 5),
-                      // ✅ Type badge — alag color sweet ke liye
-                      _smallTag(badgeText, badgeBg, badgeFg),
-                    ],
-                  ),
-                ],
-              ),
-            ),
-
-            // Status + time
-            Column(
-              crossAxisAlignment: CrossAxisAlignment.end,
-              children: [
-                Container(
-                  padding: const EdgeInsets.symmetric(
-                    horizontal: 8,
-                    vertical: 3,
-                  ),
-                  decoration: BoxDecoration(
-                    color: statusColor.withOpacity(0.1),
-                    borderRadius: BorderRadius.circular(6),
-                  ),
-                  child: Row(
-                    mainAxisSize: MainAxisSize.min,
-                    children: [
-                      Container(
-                        width: 5,
-                        height: 5,
-                        decoration: BoxDecoration(
-                          color: statusColor,
-                          shape: BoxShape.circle,
-                        ),
-                      ),
-                      const SizedBox(width: 4),
-                      Text(
-                        isOpen ? 'Open' : 'Band',
-                        style: TextStyle(
-                          fontSize: 10,
-                          fontWeight: FontWeight.w700,
-                          color: statusColor,
-                          fontFamily: 'Poppins',
-                        ),
-                      ),
-                    ],
-                  ),
-                ),
-                if (vendor.deliveryMinutes != null) ...[
-                  const SizedBox(height: 5),
-                  Text(
-                    '${vendor.deliveryMinutes} min',
-                    style: const TextStyle(
-                      fontSize: 11,
-                      fontWeight: FontWeight.w600,
-                      color: AppColors.textMuted,
-                      fontFamily: 'Poppins',
-                    ),
-                  ),
-                ],
-                const SizedBox(height: 3),
-                const Icon(
-                  Icons.chevron_right_rounded,
-                  color: AppColors.textMuted,
-                  size: 18,
-                ),
-              ],
-            ),
-          ],
-        ),
-      ),
-    );
-  }
-
-  // ✅ Sweet vendor ke liye alag placeholder emoji
-  Widget _vendorPlaceholder(VendorModel vendor, bool isSweet) {
-    return Container(
-      width: 52,
-      height: 52,
-      decoration: BoxDecoration(
-        color: isSweet
-            ? const Color(0xFFFFF1EB) // Warm orange for sweets
-            : vendor.isRestaurant
-            ? const Color(0xFFEFF6FF)
-            : AppColors.primary.withOpacity(0.08),
-        borderRadius: BorderRadius.circular(12),
-      ),
-      child: Center(
-        child: Text(
-          isSweet
-              ? '🍬'
-              : _categoryEmojis[vendor.category.split(',').first.trim()] ??
-                    (vendor.isRestaurant ? '🍽️' : '🥘'),
-          style: const TextStyle(fontSize: 24),
-        ),
-      ),
-    );
-  }
-
-  // ─────────────────────────────────────────
-  // Menu Item Card
-  // ─────────────────────────────────────────
-  Widget _itemListItem(ItemResult result) {
-    final item = result.item;
-    final vendor = result.vendor;
-
-    final displayPrice = item.minPrice;
-    final showFromLabel = item.hasHalfFull;
-
-    return GestureDetector(
-      onTap: () => _onItemTap(result),
-      child: Container(
-        padding: const EdgeInsets.all(14),
-        decoration: BoxDecoration(
-          color: AppColors.surface,
-          borderRadius: BorderRadius.circular(14),
-          border: Border.all(color: AppColors.border),
-        ),
-        child: Row(
-          children: [
-            // Item image
-            ClipRRect(
-              borderRadius: BorderRadius.circular(10),
-              child: item.imageUrl != null
-                  ? Image.network(
-                      item.imageUrl!,
-                      width: 60,
-                      height: 60,
-                      fit: BoxFit.cover,
-                      errorBuilder: (_, __, ___) => _itemPlaceholder(item),
-                    )
-                  : _itemPlaceholder(item),
-            ),
-            const SizedBox(width: 12),
-
-            Expanded(
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  // Name + veg/nonveg
-                  Row(
-                    children: [
-                      Container(
-                        width: 14,
-                        height: 14,
-                        margin: const EdgeInsets.only(right: 6),
-                        decoration: BoxDecoration(
-                          border: Border.all(
-                            color: item.isVeg
-                                ? AppColors.success
-                                : AppColors.error,
-                            width: 1.5,
-                          ),
-                          borderRadius: BorderRadius.circular(3),
-                        ),
-                        child: Center(
-                          child: Container(
-                            width: 7,
-                            height: 7,
-                            decoration: BoxDecoration(
-                              color: item.isVeg
-                                  ? AppColors.success
-                                  : AppColors.error,
-                              shape: BoxShape.circle,
-                            ),
-                          ),
-                        ),
-                      ),
-                      Expanded(
-                        child: Text(
-                          item.name,
-                          style: AppStyles.cardTitle,
-                          maxLines: 1,
-                          overflow: TextOverflow.ellipsis,
-                        ),
-                      ),
-                    ],
-                  ),
-                  const SizedBox(height: 3),
-
-                  // Vendor name
-                  Row(
-                    children: [
-                      const Icon(
-                        Icons.storefront_outlined,
-                        size: 11,
-                        color: AppColors.textMuted,
-                      ),
-                      const SizedBox(width: 3),
-                      Expanded(
-                        child: Text(
-                          vendor.name,
-                          style: const TextStyle(
-                            fontSize: 11,
-                            color: AppColors.textMuted,
-                            fontFamily: 'Poppins',
-                          ),
-                          maxLines: 1,
-                          overflow: TextOverflow.ellipsis,
-                        ),
-                      ),
-                    ],
-                  ),
-
-                  if (item.description.isNotEmpty) ...[
-                    const SizedBox(height: 3),
-                    Text(
-                      item.description,
-                      style: const TextStyle(
-                        fontSize: 11,
-                        color: AppColors.textMuted,
-                        fontFamily: 'Poppins',
-                      ),
-                      maxLines: 1,
-                      overflow: TextOverflow.ellipsis,
                     ),
                   ],
-
-                  const SizedBox(height: 6),
-
-                  // Price row
-                  Row(
-                    crossAxisAlignment: CrossAxisAlignment.center,
-                    children: [
-                      Text(
-                        '${showFromLabel ? 'From ' : ''}Rs.${displayPrice.toInt()}',
-                        style: const TextStyle(
-                          fontSize: 14,
-                          fontWeight: FontWeight.w700,
-                          color: AppColors.primary,
-                          fontFamily: 'Poppins',
-                        ),
-                      ),
-                      if (item.isDiscounted && item.originalPrice != null) ...[
-                        const SizedBox(width: 6),
-                        Text(
-                          'Rs.${item.originalPrice!.toInt()}',
-                          style: const TextStyle(
-                            fontSize: 11,
-                            color: AppColors.textMuted,
-                            fontFamily: 'Poppins',
-                            decoration: TextDecoration.lineThrough,
-                          ),
-                        ),
-                        const SizedBox(width: 4),
-                        Container(
-                          padding: const EdgeInsets.symmetric(
-                            horizontal: 5,
-                            vertical: 1,
-                          ),
-                          decoration: BoxDecoration(
-                            color: AppColors.success.withOpacity(0.1),
-                            borderRadius: BorderRadius.circular(4),
-                          ),
-                          child: Text(
-                            '${item.discountPercent}% OFF',
-                            style: const TextStyle(
-                              fontSize: 9,
-                              fontWeight: FontWeight.w700,
-                              color: AppColors.success,
-                              fontFamily: 'Poppins',
-                            ),
-                          ),
-                        ),
-                      ],
-                      const Spacer(),
-                      if (item.tag != null)
-                        Container(
-                          padding: const EdgeInsets.symmetric(
-                            horizontal: 6,
-                            vertical: 2,
-                          ),
-                          decoration: BoxDecoration(
-                            color: AppColors.accent.withOpacity(0.12),
-                            borderRadius: BorderRadius.circular(4),
-                          ),
-                          child: Text(
-                            item.tag!,
-                            style: const TextStyle(
-                              fontSize: 9,
-                              fontWeight: FontWeight.w700,
-                              color: AppColors.accent,
-                              fontFamily: 'Poppins',
-                            ),
-                          ),
-                        ),
-                    ],
-                  ),
-                ],
-              ),
-            ),
-
-            const SizedBox(width: 8),
-
-            // Availability
-            Column(
-              crossAxisAlignment: CrossAxisAlignment.end,
-              mainAxisAlignment: MainAxisAlignment.spaceBetween,
-              children: [
-                Container(
-                  padding: const EdgeInsets.symmetric(
-                    horizontal: 7,
-                    vertical: 3,
-                  ),
-                  decoration: BoxDecoration(
-                    color: item.isAvailable
-                        ? AppColors.success.withOpacity(0.1)
-                        : AppColors.error.withOpacity(0.1),
-                    borderRadius: BorderRadius.circular(6),
-                  ),
-                  child: Text(
-                    item.isAvailable ? 'Available' : 'Nahi hai',
-                    style: TextStyle(
-                      fontSize: 10,
-                      fontWeight: FontWeight.w700,
-                      color: item.isAvailable
-                          ? AppColors.success
-                          : AppColors.error,
-                      fontFamily: 'Poppins',
-                    ),
-                  ),
-                ),
-                const SizedBox(height: 16),
-                const Icon(
-                  Icons.chevron_right_rounded,
-                  color: AppColors.textMuted,
-                  size: 18,
                 ),
               ],
             ),
-          ],
-        ),
+          ),
+        ],
       ),
-    );
-  }
-
-  Widget _itemPlaceholder(MenuItemModel item) {
-    return Container(
-      width: 60,
-      height: 60,
-      decoration: BoxDecoration(
-        color: AppColors.primary.withOpacity(0.08),
-        borderRadius: BorderRadius.circular(10),
-      ),
-      child: Center(
-        child: Text(
-          _categoryEmojis[item.category] ?? '🍽️',
-          style: const TextStyle(fontSize: 26),
-        ),
-      ),
-    );
-  }
-
-  Widget _smallTag(String label, Color bgColor, Color textColor) {
-    return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
-      decoration: BoxDecoration(
-        color: bgColor,
-        borderRadius: BorderRadius.circular(6),
-      ),
-      child: Text(
-        label,
-        style: TextStyle(
-          fontSize: 10,
-          fontWeight: FontWeight.w600,
-          color: textColor,
-          fontFamily: 'Poppins',
-        ),
       ),
     );
   }

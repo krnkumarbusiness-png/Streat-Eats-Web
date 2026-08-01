@@ -29,6 +29,8 @@ class VendorModel {
   final List<String> topItemImages;
   final bool morningShiftActive;
   final bool eveningShiftActive;
+  final String? openTime; // ✅ NEW — "HH:mm" format, e.g. "11:00"
+  final String? closeTime; // ✅ NEW — "HH:mm" format, e.g. "21:00"
 
   // ✅ NEW — DB field 'discount_text' (e.g. "₹30 off", "10% off")
   final String? _discountText;
@@ -63,6 +65,8 @@ class VendorModel {
     this.topItemImages = const [],
     this.morningShiftActive = false,
     this.eveningShiftActive = true,
+    this.openTime, // ✅ NEW
+    this.closeTime, // ✅ NEW
     String? discountText, // ✅ NEW
   }) : _discountText = discountText;
 
@@ -112,6 +116,102 @@ class VendorModel {
       return 'This vendor is available in the morning shift ($mLabel). Please order then.';
     }
     return 'This vendor is not available right now. Please check back later.';
+  }
+
+  // ═══════════════════════════════════════════════════════
+  // ✅ NEW — Per-vendor custom open/close timing
+  // ═══════════════════════════════════════════════════════
+  bool get hasOwnTiming =>
+      openTime != null &&
+      openTime!.isNotEmpty &&
+      closeTime != null &&
+      closeTime!.isNotEmpty;
+
+  int? _minutesSinceMidnight(String hhmm) {
+    final parts = hhmm.split(':');
+    if (parts.length < 2) return null;
+    final h = int.tryParse(parts[0]);
+    final m = int.tryParse(parts[1]);
+    if (h == null || m == null) return null;
+    return h * 60 + m;
+  }
+
+  bool get isWithinOwnHours {
+    if (!hasOwnTiming) return true;
+    final openMin = _minutesSinceMidnight(openTime!);
+    final closeMin = _minutesSinceMidnight(closeTime!);
+    if (openMin == null || closeMin == null) return true;
+    final now = DateTime.now();
+    final nowMin = now.hour * 60 + now.minute;
+    if (closeMin > openMin) {
+      return nowMin >= openMin && nowMin < closeMin;
+    } else {
+      return nowMin >= openMin || nowMin < closeMin;
+    }
+  }
+
+  bool get isOpenNow => isActive && isCurrentShiftActive && isWithinOwnHours;
+
+  // ── Convenience getters for new vendor card ──────────────
+  /// Parsed category list from comma-separated 'category' field
+  List<String> get categories =>
+      category.split(',').map((c) => c.trim()).where((c) => c.isNotEmpty).toList();
+
+  /// Delivery time display string (e.g. "25 min")
+  String get deliveryTime {
+    if (deliveryMinutes != null) return '$deliveryMinutes min';
+    return '30 min';
+  }
+
+  /// Minutes until vendor opens (null if open or no timing set)
+  int? get opensInMinutes {
+    if (isOpenNow) return null;
+    if (!hasOwnTiming) return null;
+    final openMin = _minutesSinceMidnight(openTime!);
+    if (openMin == null) return null;
+    final now = DateTime.now();
+    final nowMin = now.hour * 60 + now.minute;
+    int diff = openMin - nowMin;
+    if (diff < 0) diff += 24 * 60;
+    return diff > 0 ? diff : null;
+  }
+
+  String? get opensInLabel {
+    if (!hasOwnTiming || isWithinOwnHours) return null;
+    final openMin = _minutesSinceMidnight(openTime!);
+    if (openMin == null) return null;
+    final now = DateTime.now();
+    final nowMin = now.hour * 60 + now.minute;
+    int diff = openMin - nowMin;
+    if (diff < 0) diff += 24 * 60;
+    final h = diff ~/ 60;
+    final m = diff % 60;
+    if (h > 0) return 'Opens in ${h}h ${m}m';
+    return 'Opens in $m min';
+  }
+
+  String? get timingRangeLabel {
+    if (!hasOwnTiming) return null;
+    String fmt(String hhmm) {
+      final parts = hhmm.split(':');
+      final h = int.tryParse(parts[0]) ?? 0;
+      final m = parts.length > 1 ? parts[1] : '00';
+      final period = h >= 12 ? 'PM' : 'AM';
+      final h12 = h % 12 == 0 ? 12 : h % 12;
+      return '$h12:$m $period';
+    }
+
+    return '${fmt(openTime!)} – ${fmt(closeTime!)}';
+  }
+
+  String get unavailableTimingMessage {
+    if (!isActive) {
+      return 'This vendor is currently unavailable. Please check back later.';
+    }
+    if (!hasOwnTiming) {
+      return 'This vendor is not available right now. Please check back later.';
+    }
+    return 'This vendor opens at $timingRangeLabel. ${opensInLabel ?? ''}';
   }
 
   // ✅ NEW — Home screen discount tag ke liye
@@ -184,6 +284,8 @@ class VendorModel {
       specialtyCategory: map['specialty_category'] as String?,
       morningShiftActive: map['morning_shift_active'] as bool? ?? false,
       eveningShiftActive: map['evening_shift_active'] as bool? ?? true,
+      openTime: map['open_time'] as String?, // ✅ NEW
+      closeTime: map['close_time'] as String?, // ✅ NEW
     );
   }
 
@@ -213,5 +315,7 @@ class VendorModel {
     'specialty_category': specialtyCategory,
     'morning_shift_active': morningShiftActive,
     'evening_shift_active': eveningShiftActive,
+    'open_time': openTime, // ✅ NEW
+    'close_time': closeTime, // ✅ NEW
   };
 }

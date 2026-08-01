@@ -14,6 +14,7 @@ import '../constants/styles.dart';
 import '../models/vendor_model.dart';
 import '../models/menu_item_model.dart';
 import '../providers/cart_provider.dart';
+import '../providers/veg_filter_provider.dart';
 import '../services/menu_service.dart';
 import '../widgets/menu_item_card.dart';
 import 'cart_screen.dart';
@@ -141,7 +142,7 @@ class _VendorDetailScreenState extends State<VendorDetailScreen> {
   Future<void> _loadMenu() async {
     setState(() => _isLoading = true);
     // Shift check — agar vendor current shift mein available nahi hai to menu mat dikhao
-    if (!widget.vendor.isCurrentShiftActive) {
+    if (!widget.vendor.isOpenNow) {
       setState(() => _isLoading = false);
       return;
     }
@@ -221,8 +222,63 @@ class _VendorDetailScreenState extends State<VendorDetailScreen> {
         }).toList();
       }
 
+      // NEW:
       _filteredItems = items;
     });
+  }
+
+  // ── Grouped display list (category headers, All tab only) ──
+  List<dynamic> _buildDisplayItems(bool isGlobalVegOnly) {
+    final showCategoryHeaders = _selectedCategory == 'All' && !_filter.isActive && !isGlobalVegOnly;
+    final List<dynamic> result = [];
+
+    final itemsToDisplay = isGlobalVegOnly
+        ? _filteredItems.where((i) => i.isVeg).toList()
+        : _filteredItems;
+
+    if (!showCategoryHeaders) {
+      for (var i = 0; i < itemsToDisplay.length; i += 2) {
+        final pair = [itemsToDisplay[i]];
+        if (i + 1 < itemsToDisplay.length) {
+          pair.add(itemsToDisplay[i + 1]);
+        }
+        result.add(pair);
+      }
+      return result;
+    }
+
+    for (final cat in _categories) {
+      if (cat == 'All') continue;
+      final itemsInCat = itemsToDisplay
+          .where((i) => i.category == cat)
+          .toList();
+      if (itemsInCat.isEmpty) continue;
+      result.add(cat);
+      for (var i = 0; i < itemsInCat.length; i += 2) {
+        final pair = [itemsInCat[i]];
+        if (i + 1 < itemsInCat.length) {
+          pair.add(itemsInCat[i + 1]);
+        }
+        result.add(pair);
+      }
+    }
+    return result;
+  }
+
+  Widget _buildCategoryHeader(String category) {
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(16, 16, 16, 8),
+      child: Text(
+        category.toUpperCase(),
+        style: const TextStyle(
+          color: AppColors.textMuted,
+          fontSize: 12,
+          fontWeight: FontWeight.w700,
+          letterSpacing: 0.8,
+          fontFamily: 'Poppins',
+        ),
+      ),
+    );
   }
 
   void _onCategorySelected(String cat) {
@@ -643,12 +699,15 @@ class _VendorDetailScreenState extends State<VendorDetailScreen> {
   @override
   Widget build(BuildContext context) {
     final cart = context.watch<CartProvider>();
+    final isGlobalVegOnly = context.watch<VegFilterProvider>().isVegOnly;
     final vendor = widget.vendor;
+    final displayItems = _buildDisplayItems(isGlobalVegOnly);
 
     return Scaffold(
+      extendBodyBehindAppBar: true,
       backgroundColor: AppColors.background,
       appBar: AppBar(
-        backgroundColor: AppColors.surface,
+        backgroundColor: Colors.transparent,
         elevation: 0,
         scrolledUnderElevation: 0,
         leadingWidth: 52,
@@ -658,10 +717,9 @@ class _VendorDetailScreenState extends State<VendorDetailScreen> {
             margin: const EdgeInsets.only(left: 12),
             width: 36,
             height: 36,
-            decoration: BoxDecoration(
-              color: AppColors.background,
-              borderRadius: BorderRadius.circular(10),
-              border: Border.all(color: AppColors.border),
+            decoration: const BoxDecoration(
+              color: Colors.white,
+              shape: BoxShape.circle,
             ),
             child: const Icon(
               Icons.arrow_back_ios_new_rounded,
@@ -670,17 +728,7 @@ class _VendorDetailScreenState extends State<VendorDetailScreen> {
             ),
           ),
         ),
-        title: Text(
-          vendor.name,
-          style: const TextStyle(
-            color: AppColors.textPrimary,
-            fontWeight: FontWeight.w700,
-            fontSize: 16,
-            fontFamily: 'Poppins',
-          ),
-          maxLines: 1,
-          overflow: TextOverflow.ellipsis,
-        ),
+
         actions: [
           IconButton(
             icon: const Icon(
@@ -696,10 +744,6 @@ class _VendorDetailScreenState extends State<VendorDetailScreen> {
           statusBarColor: Colors.transparent,
           statusBarIconBrightness: Brightness.dark,
         ),
-        bottom: const PreferredSize(
-          preferredSize: Size.fromHeight(1),
-          child: Divider(height: 1, color: AppColors.border),
-        ),
       ),
       body: SafeArea(
         top: false,
@@ -708,8 +752,36 @@ class _VendorDetailScreenState extends State<VendorDetailScreen> {
             CustomScrollView(
               physics: const BouncingScrollPhysics(),
               slivers: [
-                SliverToBoxAdapter(child: _buildShopImage(vendor)),
-                SliverToBoxAdapter(child: _buildVendorInfo(vendor)),
+                SliverToBoxAdapter(
+                  child: Container(
+                    color: AppColors.surface,
+                    child: Column(
+                      children: [
+                        _buildShopImage(vendor),
+                        _buildVendorInfo(vendor),
+                        if (isGlobalVegOnly)
+                          Container(
+                            margin: const EdgeInsets.only(bottom: 12),
+                            padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+                            decoration: BoxDecoration(
+                              color: AppColors.success.withOpacity(0.1),
+                              borderRadius: BorderRadius.circular(20),
+                              border: Border.all(color: AppColors.success.withOpacity(0.3)),
+                            ),
+                            child: const Text(
+                              'Showing veg items only',
+                              style: TextStyle(
+                                color: AppColors.success,
+                                fontSize: 11,
+                                fontWeight: FontWeight.w600,
+                                fontFamily: 'Poppins',
+                              ),
+                            ),
+                          ),
+                      ],
+                    ),
+                  ),
+                ),
 
                 if (_offers.isNotEmpty)
                   SliverToBoxAdapter(child: _buildOffersStrip()),
@@ -803,40 +875,38 @@ class _VendorDetailScreenState extends State<VendorDetailScreen> {
                     ),
                   ),
 
+                // NEW:
                 _isLoading
                     ? SliverToBoxAdapter(child: _buildShimmer())
                     : _filteredItems.isEmpty
                     ? SliverToBoxAdapter(child: _buildEmptyState())
                     : SliverList(
                         delegate: SliverChildBuilderDelegate((_, i) {
-                          final item = _filteredItems[i];
-                          final isHighlighted =
-                              item.id == widget.highlightItemId;
-                          final key = _getItemKey(item.id);
+                          final displayItem = displayItems[i];
 
-                          return AnimatedContainer(
-                            key: key,
-                            duration: const Duration(milliseconds: 200),
-                            decoration: BoxDecoration(
-                              color: isHighlighted && _isFlashing
-                                  ? AppColors.primary.withOpacity(0.08)
-                                  : Colors.transparent,
-                              border: isHighlighted
-                                  ? Border(
-                                      left: BorderSide(
-                                        color: _isFlashing
-                                            ? AppColors.primary
-                                            : AppColors.primary.withOpacity(
-                                                0.4,
-                                              ),
-                                        width: 3,
-                                      ),
-                                    )
-                                  : const Border(),
+                          if (displayItem is String) {
+                            return _buildCategoryHeader(displayItem);
+                          }
+
+                          final pair = displayItem as List<MenuItemModel>;
+                          return Padding(
+                            padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 5),
+                            child: Row(
+                              crossAxisAlignment: CrossAxisAlignment.start,
+                              children: [
+                                Expanded(
+                                  child: MenuItemCard(item: pair[0], vendor: vendor),
+                                ),
+                                const SizedBox(width: 10),
+                                Expanded(
+                                  child: pair.length > 1
+                                      ? MenuItemCard(item: pair[1], vendor: vendor)
+                                      : const SizedBox.shrink(),
+                                ),
+                              ],
                             ),
-                            child: MenuItemCard(item: item, vendor: vendor),
                           );
-                        }, childCount: _filteredItems.length),
+                        }, childCount: displayItems.length),
                       ),
 
                 const SliverToBoxAdapter(child: SizedBox(height: 120)),
@@ -845,9 +915,9 @@ class _VendorDetailScreenState extends State<VendorDetailScreen> {
 
             if (!cart.isEmpty)
               Positioned(
-                bottom: 0,
-                left: 0,
-                right: 0,
+                bottom: MediaQuery.of(context).padding.bottom > 0 ? MediaQuery.of(context).padding.bottom : 16,
+                left: 16,
+                right: 16,
                 child: _buildCartBar(cart, context),
               ),
           ],
@@ -860,80 +930,15 @@ class _VendorDetailScreenState extends State<VendorDetailScreen> {
   Widget _buildShopImage(VendorModel vendor) {
     return SizedBox(
       width: double.infinity,
-      height: 200,
-      child: Stack(
-        children: [
-          Positioned.fill(
-            child: vendor.imageUrl != null && vendor.imageUrl!.isNotEmpty
-                ? CachedNetworkImage(
-                    imageUrl: vendor.imageUrl!,
-                    fit: BoxFit.cover,
-                    placeholder: (_, __) => Container(
-                      color: AppColors.background,
-                      child: const Center(
-                        child: CircularProgressIndicator(
-                          color: AppColors.primary,
-                          strokeWidth: 2,
-                        ),
-                      ),
-                    ),
-                    errorWidget: (_, __, ___) => _buildImagePlaceholder(),
-                  )
-                : _buildImagePlaceholder(),
-          ),
-          Positioned(
-            bottom: 0,
-            left: 0,
-            right: 0,
-            height: 70,
-            child: Container(
-              decoration: BoxDecoration(
-                gradient: LinearGradient(
-                  begin: Alignment.topCenter,
-                  end: Alignment.bottomCenter,
-                  colors: [Colors.transparent, Colors.black.withOpacity(0.25)],
-                ),
-              ),
-            ),
-          ),
-          Positioned(
-            top: 12,
-            right: 12,
-            child: Container(
-              padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
-              decoration: BoxDecoration(
-                color: vendor.isActive
-                    ? AppColors.success.withOpacity(0.92)
-                    : AppColors.error.withOpacity(0.92),
-                borderRadius: BorderRadius.circular(8),
-              ),
-              child: Row(
-                mainAxisSize: MainAxisSize.min,
-                children: [
-                  Container(
-                    width: 6,
-                    height: 6,
-                    decoration: const BoxDecoration(
-                      color: Colors.white,
-                      shape: BoxShape.circle,
-                    ),
-                  ),
-                  const SizedBox(width: 5),
-                  Text(
-                    vendor.isActive ? 'Open' : 'Closed',
-                    style: const TextStyle(
-                      color: Colors.white,
-                      fontWeight: FontWeight.w700,
-                      fontSize: 11,
-                      fontFamily: 'Poppins',
-                    ),
-                  ),
-                ],
-              ),
-            ),
-          ),
-        ],
-      ),
+      height: 240,
+      child: vendor.imageUrl != null && vendor.imageUrl!.isNotEmpty
+          ? CachedNetworkImage(
+              imageUrl: vendor.imageUrl!,
+              fit: BoxFit.cover,
+              placeholder: (_, __) => Container(color: AppColors.primary),
+              errorWidget: (_, __, ___) => _buildImagePlaceholder(),
+            )
+          : _buildImagePlaceholder(),
     );
   }
 
@@ -989,28 +994,7 @@ class _VendorDetailScreenState extends State<VendorDetailScreen> {
                   spacing: 6,
                   runSpacing: 4,
                   children: [
-                    Container(
-                      padding: const EdgeInsets.symmetric(
-                        horizontal: 8,
-                        vertical: 3,
-                      ),
-                      decoration: BoxDecoration(
-                        color: AppColors.primary.withOpacity(0.08),
-                        borderRadius: BorderRadius.circular(6),
-                        border: Border.all(
-                          color: AppColors.primary.withOpacity(0.2),
-                        ),
-                      ),
-                      child: Text(
-                        vendor.category,
-                        style: const TextStyle(
-                          color: AppColors.primary,
-                          fontWeight: FontWeight.w600,
-                          fontSize: 11,
-                          fontFamily: 'Poppins',
-                        ),
-                      ),
-                    ),
+                    _buildCategoryPills(vendor.category),
                     if (vendor.vendorBadge != null &&
                         vendor.vendorBadge!.isNotEmpty)
                       Container(
@@ -1035,6 +1019,43 @@ class _VendorDetailScreenState extends State<VendorDetailScreen> {
                           ),
                         ),
                       ),
+                    Container(
+                      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
+                      decoration: BoxDecoration(
+                        color: vendor.isOpenNow
+                            ? AppColors.success.withOpacity(0.1)
+                            : AppColors.error.withOpacity(0.1),
+                        borderRadius: BorderRadius.circular(6),
+                        border: Border.all(
+                          color: vendor.isOpenNow
+                              ? AppColors.success.withOpacity(0.3)
+                              : AppColors.error.withOpacity(0.3),
+                        ),
+                      ),
+                      child: Row(
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          Container(
+                            width: 6,
+                            height: 6,
+                            decoration: BoxDecoration(
+                              color: vendor.isOpenNow ? AppColors.success : AppColors.error,
+                              shape: BoxShape.circle,
+                            ),
+                          ),
+                          const SizedBox(width: 4),
+                          Text(
+                            vendor.isOpenNow ? 'Open' : 'Closed',
+                            style: TextStyle(
+                              color: vendor.isOpenNow ? AppColors.success : AppColors.error,
+                              fontWeight: FontWeight.w700,
+                              fontSize: 11,
+                              fontFamily: 'Poppins',
+                            ),
+                          ),
+                        ],
+                      ),
+                    ),
                   ],
                 ),
                 const SizedBox(height: 10),
@@ -1065,6 +1086,66 @@ class _VendorDetailScreenState extends State<VendorDetailScreen> {
           if (vendor.rating != null) _RatingBox(rating: vendor.rating!),
         ],
       ),
+    );
+  }
+
+  Widget _buildCategoryPills(String categoryString) {
+    final cats = categoryString
+        .split(',')
+        .map((c) => c.trim())
+        .where((c) => c.isNotEmpty)
+        .toList();
+
+    if (cats.isEmpty) return const SizedBox.shrink();
+
+    const maxShow = 3;
+    final shown = cats.take(maxShow).join(', ');
+    final remaining = cats.length - maxShow;
+
+    return Row(
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        Flexible(
+          child: Container(
+            padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
+            decoration: BoxDecoration(
+              color: AppColors.primary.withOpacity(0.08),
+              borderRadius: BorderRadius.circular(6),
+              border: Border.all(color: AppColors.primary.withOpacity(0.2)),
+            ),
+            child: Text(
+              shown,
+              style: const TextStyle(
+                color: AppColors.primary,
+                fontWeight: FontWeight.w600,
+                fontSize: 11,
+                fontFamily: 'Poppins',
+              ),
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis,
+            ),
+          ),
+        ),
+        if (remaining > 0) ...[
+          const SizedBox(width: 4),
+          Container(
+            padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 3),
+            decoration: BoxDecoration(
+              color: AppColors.textMuted.withOpacity(0.12),
+              borderRadius: BorderRadius.circular(6),
+            ),
+            child: Text(
+              '+$remaining more',
+              style: const TextStyle(
+                color: AppColors.textMuted,
+                fontWeight: FontWeight.w600,
+                fontSize: 10,
+                fontFamily: 'Poppins',
+              ),
+            ),
+          ),
+        ],
+      ],
     );
   }
 
@@ -1106,7 +1187,6 @@ class _VendorDetailScreenState extends State<VendorDetailScreen> {
       color: AppColors.surface,
       child: Column(
         children: [
-          const Divider(height: 1, color: AppColors.border),
           SizedBox(
             height: 38,
             child: ListView.builder(
@@ -1138,7 +1218,6 @@ class _VendorDetailScreenState extends State<VendorDetailScreen> {
               ),
             ),
           ),
-          const Divider(height: 1, color: AppColors.border),
         ],
       ),
     );
@@ -1147,69 +1226,66 @@ class _VendorDetailScreenState extends State<VendorDetailScreen> {
   // ── Cart Bar ──────────────────────────────────────────────
   Widget _buildCartBar(CartProvider cart, BuildContext context) {
     return Container(
-      padding: const EdgeInsets.fromLTRB(16, 10, 16, 16),
       decoration: BoxDecoration(
-        color: AppColors.surface,
-        border: const Border(top: BorderSide(color: AppColors.border)),
+        color: AppColors.primary,
+        borderRadius: BorderRadius.circular(16),
         boxShadow: [
           BoxShadow(
-            color: Colors.black.withOpacity(0.07),
-            blurRadius: 16,
-            offset: const Offset(0, -4),
+            color: AppColors.primary.withOpacity(0.3),
+            blurRadius: 12,
+            offset: const Offset(0, 4),
           ),
         ],
       ),
-      child: SafeArea(
-        top: false,
-        child: ElevatedButton(
-          onPressed: () => Navigator.push(
+      child: Material(
+        color: Colors.transparent,
+        child: InkWell(
+          borderRadius: BorderRadius.circular(16),
+          onTap: () => Navigator.push(
             context,
             MaterialPageRoute(builder: (_) => const CartScreen()),
           ),
-          style: ElevatedButton.styleFrom(
-            backgroundColor: AppColors.primary,
-            foregroundColor: Colors.white,
-            minimumSize: const Size(double.infinity, 52),
-            shape: RoundedRectangleBorder(
-              borderRadius: BorderRadius.circular(14),
-            ),
-            elevation: 0,
-          ),
-          child: Row(
-            mainAxisAlignment: MainAxisAlignment.spaceBetween,
-            children: [
-              Container(
-                padding: const EdgeInsets.symmetric(horizontal: 9, vertical: 4),
-                decoration: BoxDecoration(
-                  color: Colors.white.withOpacity(0.2),
-                  borderRadius: BorderRadius.circular(7),
+          child: Padding(
+            padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
+            child: Row(
+              mainAxisAlignment: MainAxisAlignment.spaceBetween,
+              children: [
+                Container(
+                  padding: const EdgeInsets.symmetric(horizontal: 9, vertical: 4),
+                  decoration: BoxDecoration(
+                    color: Colors.white.withOpacity(0.2),
+                    borderRadius: BorderRadius.circular(7),
+                  ),
+                  child: Text(
+                    '${cart.totalItems} item${cart.totalItems > 1 ? 's' : ''}',
+                    style: const TextStyle(
+                      color: Colors.white,
+                      fontWeight: FontWeight.w600,
+                      fontSize: 11,
+                      fontFamily: 'Poppins',
+                    ),
+                  ),
                 ),
-                child: Text(
-                  '${cart.totalItems} item${cart.totalItems > 1 ? 's' : ''}',
-                  style: const TextStyle(
-                    fontWeight: FontWeight.w600,
-                    fontSize: 11,
+                const Text(
+                  'View Cart →',
+                  style: TextStyle(
+                    color: Colors.white,
+                    fontWeight: FontWeight.w800,
+                    fontSize: 14,
                     fontFamily: 'Poppins',
                   ),
                 ),
-              ),
-              const Text(
-                'View Cart →',
-                style: TextStyle(
-                  fontWeight: FontWeight.w800,
-                  fontSize: 14,
-                  fontFamily: 'Poppins',
+                Text(
+                  '₹${cart.total.toStringAsFixed(0)}',
+                  style: const TextStyle(
+                    color: Colors.white,
+                    fontWeight: FontWeight.w800,
+                    fontSize: 14,
+                    fontFamily: 'Poppins',
+                  ),
                 ),
-              ),
-              Text(
-                '₹${cart.total.toStringAsFixed(0)}',
-                style: const TextStyle(
-                  fontWeight: FontWeight.w800,
-                  fontSize: 14,
-                  fontFamily: 'Poppins',
-                ),
-              ),
-            ],
+              ],
+            ),
           ),
         ),
       ),
@@ -1372,7 +1448,7 @@ class _VendorDetailScreenState extends State<VendorDetailScreen> {
   // ── Empty State ───────────────────────────────────────────
   Widget _buildEmptyState() {
     final isFilterActive = _filter.isActive;
-    final isShiftOff = !widget.vendor.isCurrentShiftActive;
+    final isShiftOff = !widget.vendor.isOpenNow;
     return Center(
       child: Padding(
         padding: const EdgeInsets.symmetric(vertical: 52, horizontal: 24),
@@ -1415,7 +1491,7 @@ class _VendorDetailScreenState extends State<VendorDetailScreen> {
             const SizedBox(height: 6),
             Text(
               isShiftOff
-                  ? widget.vendor.unavailableShiftMessage
+                  ? widget.vendor.unavailableTimingMessage
                   : isFilterActive
                   ? 'Try adjusting or clearing your filters'
                   : _filter.vegOnly
@@ -1571,9 +1647,6 @@ class _FilterDelegate extends SliverPersistentHeaderDelegate {
       child: Column(
         mainAxisSize: MainAxisSize.min,
         children: [
-          if (overlapsContent)
-            const Divider(height: 1, color: AppColors.border),
-
           Expanded(
             child: Row(
               crossAxisAlignment: CrossAxisAlignment.center,
@@ -1658,13 +1731,6 @@ class _FilterDelegate extends SliverPersistentHeaderDelegate {
                   ),
                 ),
 
-                Container(
-                  width: 1,
-                  height: 24,
-                  color: AppColors.border,
-                  margin: const EdgeInsets.symmetric(horizontal: 4),
-                ),
-
                 // ── Categories scroll ─────────────────────
                 Expanded(
                   child: ListView.builder(
@@ -1714,12 +1780,6 @@ class _FilterDelegate extends SliverPersistentHeaderDelegate {
                 ),
 
                 // ── Veg toggle ────────────────────────────
-                Container(
-                  width: 1,
-                  height: 28,
-                  color: AppColors.border,
-                  margin: const EdgeInsets.symmetric(horizontal: 4),
-                ),
                 GestureDetector(
                   onTap: onVegToggle,
                   child: AnimatedContainer(

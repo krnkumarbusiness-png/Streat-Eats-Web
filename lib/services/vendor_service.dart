@@ -351,6 +351,8 @@ class VendorService {
       specialtyCategory: v.specialtyCategory,
       morningShiftActive: v.morningShiftActive,
       eveningShiftActive: v.eveningShiftActive,
+      openTime: v.openTime, // ✅ NEW
+      closeTime: v.closeTime, // ✅ NEW
       discountText: v.discountText,
     );
   }

@@ -4,7 +4,9 @@ import '../constants/styles.dart';
 import '../models/order_model.dart';
 import '../services/order_service.dart';
 import 'order_status_screen.dart';
-import '../constants/app_snackbar.dart';
+import '../services/review_service.dart';
+import 'review_screen.dart';
+import '../constants/globals.dart';
 
 class OrderHistoryScreen extends StatefulWidget {
   const OrderHistoryScreen({super.key});
@@ -15,13 +17,21 @@ class OrderHistoryScreen extends StatefulWidget {
 
 class _OrderHistoryScreenState extends State<OrderHistoryScreen> {
   List<OrderModel> _orders = [];
+  Set<String> _reviewedOrderIds = {};
   bool _isLoading = true;
   String _errorMsg = '';
 
   @override
   void initState() {
     super.initState();
+    CartVisibilityControl.hide();
     _loadOrders();
+  }
+
+  @override
+  void dispose() {
+    CartVisibilityControl.show();
+    super.dispose();
   }
 
   Future<void> _loadOrders() async {
@@ -31,9 +41,16 @@ class _OrderHistoryScreenState extends State<OrderHistoryScreen> {
     });
     try {
       final orders = await OrderService().getUserOrders();
+      // Delivered orders ke liye reviewed IDs fetch karo
+      final deliveredIds = orders
+          .where((o) => o.status == 'delivered')
+          .map((o) => o.id)
+          .toList();
+      final reviewed = await ReviewService().getReviewedOrderIds(deliveredIds);
       if (mounted) {
         setState(() {
           _orders = orders;
+          _reviewedOrderIds = reviewed;
           _isLoading = false;
         });
       }
@@ -155,7 +172,28 @@ class _OrderHistoryScreenState extends State<OrderHistoryScreen> {
     final date = _formatDate(order.createdAt);
     final statusColor = _getStatusColor(order.status);
     final isActive = _isActive(order.status);
-    final isRejected = order.status == 'rejected'; // ✅ NEW
+    final isRejected = order.status == 'rejected';
+
+    // Progress bar ke liye step calculate karo
+    int progressStep() {
+      switch (order.status) {
+        case 'placed':
+          return 1;
+        case 'preparing':
+          return 2;
+        case 'picked_up':
+          return 3;
+        case 'on_the_way':
+          return 4;
+        case 'delivered':
+          return 5;
+        default:
+          return 0;
+      }
+    }
+
+    final step = progressStep();
+    final totalSteps = 5;
 
     return GestureDetector(
       onTap: () => Navigator.push(
@@ -177,203 +215,374 @@ class _OrderHistoryScreenState extends State<OrderHistoryScreen> {
           ),
           boxShadow: [
             BoxShadow(
-              color: Colors.black.withOpacity(0.03),
-              blurRadius: 8,
-              offset: const Offset(0, 2),
+              color: Colors.black.withOpacity(0.04),
+              blurRadius: 10,
+              offset: const Offset(0, 3),
             ),
           ],
         ),
-        child: Padding(
-          padding: const EdgeInsets.all(16),
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              // ID + Status
-              Row(
-                mainAxisAlignment: MainAxisAlignment.spaceBetween,
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            // ── TOP PROGRESS BAR (sirf active orders pe) ──
+            if (isActive)
+              ClipRRect(
+                borderRadius: const BorderRadius.vertical(
+                  top: Radius.circular(16),
+                ),
+                child: LinearProgressIndicator(
+                  value: step / totalSteps,
+                  backgroundColor: AppColors.primary.withOpacity(0.12),
+                  valueColor: AlwaysStoppedAnimation<Color>(AppColors.primary),
+                  minHeight: 4,
+                ),
+              )
+            else
+              // Delivered = green bar full, cancelled/rejected = red bar
+              ClipRRect(
+                borderRadius: const BorderRadius.vertical(
+                  top: Radius.circular(16),
+                ),
+                child: LinearProgressIndicator(
+                  value: order.status == 'delivered' ? 1.0 : 0.0,
+                  backgroundColor: isRejected || order.status == 'cancelled'
+                      ? AppColors.error.withOpacity(0.15)
+                      : AppColors.success.withOpacity(0.15),
+                  valueColor: AlwaysStoppedAnimation<Color>(
+                    order.status == 'delivered'
+                        ? AppColors.success
+                        : AppColors.error,
+                  ),
+                  minHeight: 4,
+                ),
+              ),
+
+            Padding(
+              padding: const EdgeInsets.fromLTRB(16, 14, 16, 14),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  Text(
-                    '#$shortId',
-                    style: AppStyles.cardTitle.copyWith(
-                      color: AppColors.primary,
-                    ),
-                  ),
-                  Container(
-                    padding: const EdgeInsets.symmetric(
-                      horizontal: 10,
-                      vertical: 4,
-                    ),
-                    decoration: BoxDecoration(
-                      color: statusColor.withOpacity(0.1),
-                      borderRadius: BorderRadius.circular(20),
-                      border: Border.all(color: statusColor.withOpacity(0.3)),
-                    ),
-                    child: Text(
-                      _getStatusLabel(order.status),
-                      style: AppStyles.labelText.copyWith(
-                        color: statusColor,
-                        fontSize: 11,
-                      ),
-                    ),
-                  ),
-                ],
-              ),
-
-              const SizedBox(height: 12),
-              const Divider(color: AppColors.border, height: 1),
-              const SizedBox(height: 12),
-
-              // Vendor + Date
-              Row(
-                children: [
-                  const Icon(
-                    Icons.storefront_outlined,
-                    size: 15,
-                    color: AppColors.primary,
-                  ),
-                  const SizedBox(width: 6),
-                  Expanded(
-                    child: Text(
-                      order.vendorName,
-                      style: AppStyles.cardTitle,
-                      maxLines: 1,
-                      overflow: TextOverflow.ellipsis,
-                    ),
-                  ),
-                  Text(date, style: AppStyles.bodyText.copyWith(fontSize: 11)),
-                ],
-              ),
-
-              const SizedBox(height: 8),
-
-              // Items
-              Text(
-                order.items.isEmpty
-                    ? 'Loading items...'
-                    : order.items
-                          .map((i) => '${i.name} ×${i.quantity}')
-                          .join(', '),
-                style: AppStyles.bodyText.copyWith(fontSize: 12),
-                maxLines: 2,
-                overflow: TextOverflow.ellipsis,
-              ),
-
-              // ✅ Rejected message
-              if (isRejected) ...[
-                const SizedBox(height: 8),
-                Container(
-                  padding: const EdgeInsets.symmetric(
-                    horizontal: 10,
-                    vertical: 6,
-                  ),
-                  decoration: BoxDecoration(
-                    color: AppColors.error.withOpacity(0.06),
-                    borderRadius: BorderRadius.circular(8),
-                    border: Border.all(color: AppColors.error.withOpacity(0.2)),
-                  ),
-                  child: const Row(
+                  // ── STATUS + PRICE ROW ──
+                  Row(
+                    crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
-                      Icon(
-                        Icons.info_outline_rounded,
-                        color: AppColors.error,
-                        size: 13,
-                      ),
-                      SizedBox(width: 6),
-                      Expanded(
-                        child: Text(
-                          'Your order was rejected by the rider. Please place a new order.',
-                          style: TextStyle(
-                            color: AppColors.error,
-                            fontSize: 11,
-                            fontFamily: 'Poppins',
-                            height: 1.4,
+                      // Status icon box
+                      Container(
+                        width: 44,
+                        height: 44,
+                        decoration: BoxDecoration(
+                          color: statusColor.withOpacity(0.10),
+                          borderRadius: BorderRadius.circular(12),
+                          border: Border.all(
+                            color: statusColor.withOpacity(0.25),
                           ),
+                        ),
+                        child: Icon(
+                          order.status == 'delivered'
+                              ? Icons.check_rounded
+                              : order.status == 'cancelled' || isRejected
+                              ? Icons.close_rounded
+                              : order.status == 'on_the_way'
+                              ? Icons.delivery_dining_rounded
+                              : order.status == 'picked_up'
+                              ? Icons.shopping_bag_rounded
+                              : Icons.receipt_long_rounded,
+                          color: statusColor,
+                          size: 22,
+                        ),
+                      ),
+                      const SizedBox(width: 12),
+                      Expanded(
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            Text(
+                              _getStatusLabel(order.status),
+                              style: const TextStyle(
+                                fontSize: 15,
+                                fontWeight: FontWeight.w800,
+                                color: Color(0xFF1A1A1A),
+                                fontFamily: 'Poppins',
+                              ),
+                            ),
+                            const SizedBox(height: 2),
+                            Text(
+                              order.vendorName,
+                              style: const TextStyle(
+                                fontSize: 12,
+                                color: Color(0xFF6B7280),
+                                fontFamily: 'Poppins',
+                              ),
+                              maxLines: 1,
+                              overflow: TextOverflow.ellipsis,
+                            ),
+                          ],
+                        ),
+                      ),
+                      const SizedBox(width: 8),
+                      Text(
+                        '₹${order.total.toStringAsFixed(0)}',
+                        style: const TextStyle(
+                          fontSize: 18,
+                          fontWeight: FontWeight.w800,
+                          color: Color(0xFF1A1A1A),
+                          fontFamily: 'Poppins',
                         ),
                       ),
                     ],
                   ),
-                ),
-              ],
 
-              const SizedBox(height: 12),
+                  const SizedBox(height: 14),
 
-              // Total + Action
-              Row(
-                mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                children: [
-                  Text(
-                    '₹${order.total.toStringAsFixed(0)}',
-                    style: AppStyles.priceText,
-                  ),
-                  if (isActive)
+                  // ── ITEMS LIST ──
+                  if (order.items.isNotEmpty)
+                    ...order.items
+                        .take(3)
+                        .map(
+                          (item) => Padding(
+                            padding: const EdgeInsets.only(bottom: 6),
+                            child: Row(
+                              children: [
+                                // Quantity badge
+                                Container(
+                                  padding: const EdgeInsets.symmetric(
+                                    horizontal: 7,
+                                    vertical: 2,
+                                  ),
+                                  decoration: BoxDecoration(
+                                    color: AppColors.error.withOpacity(0.10),
+                                    borderRadius: BorderRadius.circular(6),
+                                    border: Border.all(
+                                      color: AppColors.error.withOpacity(0.25),
+                                    ),
+                                  ),
+                                  child: Text(
+                                    '${item.quantity}×',
+                                    style: TextStyle(
+                                      fontSize: 11,
+                                      fontWeight: FontWeight.w700,
+                                      color: AppColors.error,
+                                      fontFamily: 'Poppins',
+                                    ),
+                                  ),
+                                ),
+                                const SizedBox(width: 8),
+                                Expanded(
+                                  child: Text(
+                                    item.name,
+                                    style: const TextStyle(
+                                      fontSize: 13,
+                                      fontWeight: FontWeight.w500,
+                                      color: Color(0xFF1A1A1A),
+                                      fontFamily: 'Poppins',
+                                    ),
+                                    maxLines: 1,
+                                    overflow: TextOverflow.ellipsis,
+                                  ),
+                                ),
+                              ],
+                            ),
+                          ),
+                        ),
+
+                  // More items indicator
+                  if (order.items.length > 3)
+                    Padding(
+                      padding: const EdgeInsets.only(bottom: 6),
+                      child: Text(
+                        '+${order.items.length - 3} more items',
+                        style: TextStyle(
+                          fontSize: 11,
+                          color: AppColors.textMuted,
+                          fontFamily: 'Poppins',
+                        ),
+                      ),
+                    ),
+
+                  // ── REJECTED MESSAGE ──
+                  if (isRejected) ...[
+                    const SizedBox(height: 4),
                     Container(
                       padding: const EdgeInsets.symmetric(
-                        horizontal: 12,
+                        horizontal: 10,
                         vertical: 6,
                       ),
                       decoration: BoxDecoration(
-                        color: AppColors.primary.withOpacity(0.08),
-                        borderRadius: BorderRadius.circular(20),
+                        color: AppColors.error.withOpacity(0.06),
+                        borderRadius: BorderRadius.circular(8),
                         border: Border.all(
-                          color: AppColors.primary.withOpacity(0.3),
+                          color: AppColors.error.withOpacity(0.2),
                         ),
                       ),
-                      child: Row(
-                        mainAxisSize: MainAxisSize.min,
+                      child: const Row(
                         children: [
-                          const Icon(
-                            Icons.radar,
-                            color: AppColors.primary,
-                            size: 12,
+                          Icon(
+                            Icons.info_outline_rounded,
+                            color: AppColors.error,
+                            size: 13,
                           ),
-                          const SizedBox(width: 4),
-                          Text(
-                            'Track Order',
-                            style: AppStyles.labelText.copyWith(
-                              color: AppColors.primary,
-                              fontSize: 11,
+                          SizedBox(width: 6),
+                          Expanded(
+                            child: Text(
+                              'Order was rejected. Please place a new order.',
+                              style: TextStyle(
+                                color: AppColors.error,
+                                fontSize: 11,
+                                fontFamily: 'Poppins',
+                                height: 1.4,
+                              ),
                             ),
                           ),
                         ],
                       ),
                     ),
-                  if (order.status == 'delivered')
-                    GestureDetector(
-                      onTap: () =>
-                          AppSnackBar.showInfo(context, 'Finding vendor...'),
-                      child: Container(
-                        padding: const EdgeInsets.symmetric(
-                          horizontal: 12,
-                          vertical: 6,
-                        ),
-                        decoration: BoxDecoration(
-                          color: AppColors.primary,
-                          borderRadius: BorderRadius.circular(20),
-                        ),
-                        child: Row(
-                          mainAxisSize: MainAxisSize.min,
-                          children: [
-                            const Icon(
-                              Icons.replay_rounded,
-                              color: Colors.white,
-                              size: 12,
-                            ),
-                            const SizedBox(width: 4),
-                            Text(
-                              'Reorder',
-                              style: AppStyles.labelText.copyWith(
-                                color: Colors.white,
-                                fontSize: 11,
-                              ),
-                            ),
-                          ],
+                  ],
+
+                  const SizedBox(height: 12),
+                  Container(height: 1, color: AppColors.border),
+                  const SizedBox(height: 12),
+
+                  // ── DATE + ACTION BUTTON ROW ──
+                  Row(
+                    mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                    children: [
+                      Text(
+                        date,
+                        style: const TextStyle(
+                          fontSize: 12,
+                          color: Color(0xFF6B7280),
+                          fontFamily: 'Poppins',
                         ),
                       ),
-                    ),
+
+                      // Track Order button (active orders)
+                      if (isActive)
+                        Container(
+                          padding: const EdgeInsets.symmetric(
+                            horizontal: 16,
+                            vertical: 8,
+                          ),
+                          decoration: BoxDecoration(
+                            color: AppColors.primary,
+                            borderRadius: BorderRadius.circular(20),
+                          ),
+                          child: const Row(
+                            mainAxisSize: MainAxisSize.min,
+                            children: [
+                              Text(
+                                'Track Order',
+                                style: TextStyle(
+                                  color: Colors.white,
+                                  fontSize: 12,
+                                  fontWeight: FontWeight.w700,
+                                  fontFamily: 'Poppins',
+                                ),
+                              ),
+                              SizedBox(width: 4),
+                              Icon(
+                                Icons.arrow_forward_ios_rounded,
+                                color: Colors.white,
+                                size: 11,
+                              ),
+                            ],
+                          ),
+                        ),
+
+                      // Rate Order / Reviewed (delivered orders)
+                      if (order.status == 'delivered')
+                        _reviewedOrderIds.contains(order.id)
+                            ? Container(
+                                padding: const EdgeInsets.symmetric(
+                                  horizontal: 12,
+                                  vertical: 7,
+                                ),
+                                decoration: BoxDecoration(
+                                  color: AppColors.success.withOpacity(0.10),
+                                  borderRadius: BorderRadius.circular(20),
+                                  border: Border.all(
+                                    color: AppColors.success.withOpacity(0.3),
+                                  ),
+                                ),
+                                child: Row(
+                                  mainAxisSize: MainAxisSize.min,
+                                  children: [
+                                    Icon(
+                                      Icons.check_circle_rounded,
+                                      color: AppColors.success,
+                                      size: 13,
+                                    ),
+                                    const SizedBox(width: 4),
+                                    Text(
+                                      'Reviewed',
+                                      style: TextStyle(
+                                        color: AppColors.success,
+                                        fontSize: 11,
+                                        fontWeight: FontWeight.w700,
+                                        fontFamily: 'Poppins',
+                                      ),
+                                    ),
+                                  ],
+                                ),
+                              )
+                            : GestureDetector(
+                                onTap: () async {
+                                  final submitted =
+                                      await showModalBottomSheet<bool>(
+                                        context: context,
+                                        isScrollControlled: true,
+                                        backgroundColor: Colors.transparent,
+                                        builder: (_) => ReviewBottomSheet(
+                                          orderId: order.id,
+                                          vendorId: order.vendorId,
+                                          vendorName: order.vendorName,
+                                          hasRider:
+                                              order.riderName != null &&
+                                              order.riderName!.isNotEmpty,
+                                        ),
+                                      );
+                                  if (submitted == true && mounted) {
+                                    setState(() {
+                                      _reviewedOrderIds.add(order.id);
+                                    });
+                                  }
+                                },
+                                child: Container(
+                                  padding: const EdgeInsets.symmetric(
+                                    horizontal: 16,
+                                    vertical: 8,
+                                  ),
+                                  decoration: BoxDecoration(
+                                    color: AppColors.primary,
+                                    borderRadius: BorderRadius.circular(20),
+                                  ),
+                                  child: const Row(
+                                    mainAxisSize: MainAxisSize.min,
+                                    children: [
+                                      Icon(
+                                        Icons.star_rounded,
+                                        color: Colors.white,
+                                        size: 13,
+                                      ),
+                                      SizedBox(width: 4),
+                                      Text(
+                                        'Rate Order',
+                                        style: TextStyle(
+                                          color: Colors.white,
+                                          fontSize: 12,
+                                          fontWeight: FontWeight.w700,
+                                          fontFamily: 'Poppins',
+                                        ),
+                                      ),
+                                    ],
+                                  ),
+                                ),
+                              ),
+                    ],
+                  ),
                 ],
               ),
-            ],
-          ),
+            ),
+          ],
         ),
       ),
     );

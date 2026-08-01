@@ -8,6 +8,7 @@ import '../models/combo_model.dart';
 import '../models/menu_item_model.dart';
 import '../models/vendor_model.dart';
 import '../providers/cart_provider.dart';
+import '../utils/cart_utils.dart';
 import '../services/vendor_service.dart';
 import '../constants/app_snackbar.dart';
 import 'cart_screen.dart';
@@ -71,16 +72,19 @@ class _ComboDetailScreenState extends State<ComboDetailScreen> {
       imageUrl: widget.combo.imageUrl,
     );
 
-    final cart = context.read<CartProvider>();
-    final added = cart.addItem(comboAsItem, _vendor!);
-
-    setState(() => _addingToCart = false);
-
-    if (added) {
-      AppSnackBar.showSuccess(context, '${widget.combo.name} added to cart!');
-    } else {
-      AppSnackBar.showError(context, 'Cart limit reached!');
-    }
+    CartUtils.handleCartAddItem(
+      context,
+      comboAsItem,
+      _vendor!,
+      onSuccess: () {
+        setState(() => _addingToCart = false);
+        AppSnackBar.showSuccess(context, '${widget.combo.name} added to cart!');
+      },
+      onLimitReached: () {
+        setState(() => _addingToCart = false);
+        AppSnackBar.showError(context, 'Cart limit reached!');
+      },
+    );
   }
 
   @override
@@ -182,7 +186,7 @@ class _ComboDetailScreenState extends State<ComboDetailScreen> {
                                 ],
                               ),
                               child: Text(
-                                '${combo.discountPercent}% OFF',
+                                '₹${(combo.originalPrice! - combo.appPrice).toStringAsFixed(0)} OFF',
                                 style: const TextStyle(
                                   color: Colors.white,
                                   fontSize: 12,
@@ -316,7 +320,7 @@ class _ComboDetailScreenState extends State<ComboDetailScreen> {
                                       ),
                                       const SizedBox(height: 2),
                                       Text(
-                                        '${combo.discountPercent}%\nSaved',
+                                        '₹${(combo.originalPrice! - combo.appPrice).toStringAsFixed(0)}\nSaved',
                                         textAlign: TextAlign.center,
                                         style: const TextStyle(
                                           fontFamily: 'Poppins',

@@ -102,6 +102,7 @@ class RecommendedItemCard extends StatelessWidget {
                   ),
                 ),
 
+                // NEW:
                 // Tag badge — Bestseller, New, etc.
                 if (item.tag != null && item.tag!.isNotEmpty)
                   Positioned(
@@ -121,6 +122,34 @@ class RecommendedItemCard extends StatelessWidget {
                         style: const TextStyle(
                           color: Colors.white,
                           fontSize: 8,
+                          fontWeight: FontWeight.w800,
+                          fontFamily: 'Poppins',
+                        ),
+                      ),
+                    ),
+                  ),
+
+                // ✅ Discount OFF badge — bottom-left of image
+                if (item.isDiscounted &&
+                    item.originalPrice != null &&
+                    item.originalPrice! > item.appPrice)
+                  Positioned(
+                    bottom: 6,
+                    left: 6,
+                    child: Container(
+                      padding: const EdgeInsets.symmetric(
+                        horizontal: 6,
+                        vertical: 3,
+                      ),
+                      decoration: BoxDecoration(
+                        color: AppColors.success,
+                        borderRadius: BorderRadius.circular(6),
+                      ),
+                      child: Text(
+                        '₹${(item.originalPrice! - item.appPrice).toStringAsFixed(0)} OFF',
+                        style: const TextStyle(
+                          color: Colors.white,
+                          fontSize: 9,
                           fontWeight: FontWeight.w800,
                           fontFamily: 'Poppins',
                         ),
@@ -169,25 +198,25 @@ class RecommendedItemCard extends StatelessWidget {
                       Column(
                         crossAxisAlignment: CrossAxisAlignment.start,
                         children: [
-                          Text(
-                            '₹${item.appPrice.toStringAsFixed(0)}',
-                            style: const TextStyle(
-                              fontSize: 13,
-                              fontWeight: FontWeight.w800,
-                              color: AppColors.primary,
-                              fontFamily: 'Poppins',
-                            ),
-                          ),
                           if (item.isDiscounted && item.originalPrice != null)
                             Text(
                               '₹${item.originalPrice!.toStringAsFixed(0)}',
                               style: const TextStyle(
                                 fontSize: 9,
                                 color: AppColors.textMuted,
-                                fontFamily: 'Poppins',
+                                fontFamily: 'SpaceMono',
                                 decoration: TextDecoration.lineThrough,
                               ),
                             ),
+                          Text(
+                            '₹${item.appPrice.toStringAsFixed(0)}',
+                            style: const TextStyle(
+                              fontSize: 13,
+                              fontWeight: FontWeight.w800,
+                              color: AppColors.primary,
+                              fontFamily: 'SpaceMono',
+                            ),
+                          ),
                         ],
                       ),
 
@@ -203,7 +232,7 @@ class RecommendedItemCard extends StatelessWidget {
                             vertical: 5,
                           ),
                           decoration: BoxDecoration(
-                            color: AppColors.primary,
+                            color: const Color(0xFF16A34A),
                             borderRadius: BorderRadius.circular(8),
                           ),
                           child: const Text(

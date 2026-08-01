@@ -17,6 +17,7 @@ import 'vendor_detail_screen.dart';
 import 'package:provider/provider.dart';
 import '../providers/cart_provider.dart';
 import '../widgets/vendor_card.dart';
+import '../widgets/disclaimer_widget.dart';
 
 // ── Local color palette ──────────────────────────────────────
 class _LC {
@@ -125,18 +126,40 @@ class _SweetsScreenState extends State<SweetsScreen>
       if (settingsData != null) {
         final slotsRaw = settingsData['time_slots'];
         if (slotsRaw != null) {
-          for (final slot in (slotsRaw as List)) {
-            final open = slot['open'] as String? ?? '';
-            final close = slot['close'] as String? ?? '';
-            if (open.isEmpty || close.isEmpty) continue;
-            final openHour = int.tryParse(open.split(':')[0]) ?? 0;
-            final closeHour = int.tryParse(close.split(':')[0]) ?? 0;
-            if (openHour < 14) {
-              VendorModel.morningStartHour = openHour;
-              VendorModel.morningEndHour = closeHour;
-            } else {
-              VendorModel.eveningStartHour = openHour;
-              VendorModel.eveningEndHour = closeHour;
+          final enabledSlots = (slotsRaw as List)
+              .map((s) => Map<String, dynamic>.from(s as Map))
+              .where(
+                (s) =>
+                    (s['enabled'] as bool? ?? true) &&
+                    (s['open'] as String? ?? '').isNotEmpty &&
+                    (s['close'] as String? ?? '').isNotEmpty,
+              )
+              .toList();
+
+          if (enabledSlots.length == 1) {
+            // ✅ Single global slot — morning aur evening dono isi se set honge
+            final s = enabledSlots.first;
+            final openHour =
+                int.tryParse((s['open'] as String).split(':')[0]) ?? 0;
+            final closeHour =
+                int.tryParse((s['close'] as String).split(':')[0]) ?? 0;
+            VendorModel.morningStartHour = openHour;
+            VendorModel.morningEndHour = closeHour;
+            VendorModel.eveningStartHour = openHour;
+            VendorModel.eveningEndHour = closeHour;
+          } else {
+            for (final slot in enabledSlots) {
+              final open = slot['open'] as String;
+              final close = slot['close'] as String;
+              final openHour = int.tryParse(open.split(':')[0]) ?? 0;
+              final closeHour = int.tryParse(close.split(':')[0]) ?? 0;
+              if (openHour < 14) {
+                VendorModel.morningStartHour = openHour;
+                VendorModel.morningEndHour = closeHour;
+              } else {
+                VendorModel.eveningStartHour = openHour;
+                VendorModel.eveningEndHour = closeHour;
+              }
             }
           }
         }
@@ -427,6 +450,8 @@ class _SweetsScreenState extends State<SweetsScreen>
               ),
 
             const SliverToBoxAdapter(child: SizedBox(height: 16)),
+            const SliverToBoxAdapter(child: DisclaimerWidget()),
+            const SliverToBoxAdapter(child: SizedBox(height: 80)),
           ],
         ),
       ),
@@ -718,16 +743,12 @@ class _SweetsHeaderDelegate extends SliverPersistentHeaderDelegate {
   ) {
     return Container(
       height: topPadding + _h,
-      decoration: BoxDecoration(
-        color: _LC.surface,
-        border: const Border(bottom: BorderSide(color: _LC.border, width: 1)),
-        boxShadow: [
-          BoxShadow(
-            color: Colors.black.withOpacity(0.05),
-            blurRadius: 6,
-            offset: const Offset(0, 2),
-          ),
-        ],
+      decoration: const BoxDecoration(
+        gradient: LinearGradient(
+          begin: Alignment.topCenter,
+          end: Alignment.bottomCenter,
+          colors: [Color(0xFFFF6B35), Color(0xFFFF8C5A)],
+        ),
       ),
       child: Padding(
         padding: EdgeInsets.fromLTRB(16, topPadding + 14, 16, 14),
@@ -739,7 +760,7 @@ class _SweetsHeaderDelegate extends SliverPersistentHeaderDelegate {
               child: Text(
                 'Sweets & Desserts',
                 style: TextStyle(
-                  color: _LC.textPrimary,
+                  color: Colors.white,
                   fontSize: 20,
                   fontWeight: FontWeight.w800,
                   fontFamily: 'Poppins',
@@ -753,14 +774,14 @@ class _SweetsHeaderDelegate extends SliverPersistentHeaderDelegate {
                   vertical: 5,
                 ),
                 decoration: BoxDecoration(
-                  color: _LC.warningLight,
+                  color: Colors.white.withOpacity(0.20),
                   borderRadius: BorderRadius.circular(20),
-                  border: Border.all(color: _LC.warning.withOpacity(0.4)),
+                  border: Border.all(color: Colors.white.withOpacity(0.35)),
                 ),
                 child: Text(
                   '$vendorCount shops',
                   style: const TextStyle(
-                    color: _LC.warning,
+                    color: Colors.white,
                     fontSize: 11,
                     fontWeight: FontWeight.w700,
                     fontFamily: 'Poppins',

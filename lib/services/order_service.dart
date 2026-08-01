@@ -21,11 +21,17 @@ class OrderService {
             'platform_fee, '
             'delivery_charge_0_1, delivery_charge_1_2, '
             'delivery_charge_2_3, delivery_charge_3_4, '
-            'delivery_charge_4_5, delivery_charge_5_plus, '
+            'delivery_charge_4_5, '
+            'delivery_charge_extra_per_km, '
+            'rider_payout_0_1, rider_payout_1_2, '
+            'rider_payout_2_3, rider_payout_3_4, '
+            'rider_payout_4_5, rider_payout_extra_per_km, '
             'max_delivery_km, '
             'is_timing_enabled, open_time, close_time, time_slots, '
             'packaging_enabled, packaging_fee_0_99, '
-            'packaging_fee_100_199, packaging_fee_200_plus',
+            'packaging_fee_100_199, packaging_fee_200_plus, '
+            'free_delivery_enabled, free_delivery_min_amount, '
+            'free_delivery_max_distance',
           )
           .limit(1)
           .maybeSingle();
@@ -38,34 +44,80 @@ class OrderService {
 
     return {
       'platform_fee': 5,
-      'delivery_charge_0_1': 0,
-      'delivery_charge_1_2': 10,
-      'delivery_charge_2_3': 20,
-      'delivery_charge_3_4': 30,
-      'delivery_charge_4_5': 40,
-      'delivery_charge_5_plus': 50,
+      'delivery_charge_0_1': 18,
+      'delivery_charge_1_2': 28,
+      'delivery_charge_2_3': 38,
+      'delivery_charge_3_4': 48,
+      'delivery_charge_4_5': 58,
+      'delivery_charge_5_plus': 58,
+      'delivery_charge_extra_per_km': 10,
+      'rider_payout_0_1': 15,
+      'rider_payout_1_2': 22,
+      'rider_payout_2_3': 30,
+      'rider_payout_3_4': 38,
+      'rider_payout_4_5': 46,
+      'rider_payout_extra_per_km': 8,
       'max_delivery_km': 10,
     };
   }
 
-  Future<int> getDeliveryCharge(double distanceKm) async {
+  Future<int> getDeliveryCharge(double distanceKm, {double? subtotal}) async {
+    final s = await _getSettings();
+
+    // Free delivery check
+    if (s['free_delivery_enabled'] == true && subtotal != null) {
+      final minAmt = (s['free_delivery_min_amount'] as num?)?.toDouble() ?? 0.0;
+      final maxDist = (s['free_delivery_max_distance'] as num?)?.toDouble() ?? 0.0;
+      if (subtotal >= minAmt && distanceKm <= maxDist) {
+        return 0; // FREE
+      }
+    }
+
+    if (distanceKm <= 0) {
+      return (s['delivery_charge_0_1'] as num?)?.toInt() ?? 18;
+    }
+    int fee = 0;
+    if (distanceKm <= 1) {
+      fee = (s['delivery_charge_0_1'] as num?)?.toInt() ?? 18;
+    } else if (distanceKm <= 2) {
+      fee = (s['delivery_charge_1_2'] as num?)?.toInt() ?? 28;
+    } else if (distanceKm <= 3) {
+      fee = (s['delivery_charge_2_3'] as num?)?.toInt() ?? 38;
+    } else if (distanceKm <= 4) {
+      fee = (s['delivery_charge_3_4'] as num?)?.toInt() ?? 48;
+    } else if (distanceKm <= 5) {
+      fee = (s['delivery_charge_4_5'] as num?)?.toInt() ?? 58;
+    } else {
+      final base = (s['delivery_charge_4_5'] as num?)?.toInt() ?? 58;
+      final perKm = (s['delivery_charge_extra_per_km'] as num?)?.toInt() ?? 10;
+      final extraKm = (distanceKm - 5).ceil();
+      fee = base + (perKm * extraKm);
+    }
+    return fee.clamp(0, 200);
+  }
+
+  // Rider payout — rider ko actually ye milta hai, platform margin rakhta hai
+  Future<int> getRiderPayout(double distanceKm) async {
     final s = await _getSettings();
     if (distanceKm <= 1) {
-      return (s['delivery_charge_0_1'] as num?)?.toInt() ?? 0;
+      return (s['rider_payout_0_1'] as num?)?.toInt() ?? 15;
     }
     if (distanceKm <= 2) {
-      return (s['delivery_charge_1_2'] as num?)?.toInt() ?? 10;
+      return (s['rider_payout_1_2'] as num?)?.toInt() ?? 22;
     }
     if (distanceKm <= 3) {
-      return (s['delivery_charge_2_3'] as num?)?.toInt() ?? 20;
+      return (s['rider_payout_2_3'] as num?)?.toInt() ?? 30;
     }
     if (distanceKm <= 4) {
-      return (s['delivery_charge_3_4'] as num?)?.toInt() ?? 30;
+      return (s['rider_payout_3_4'] as num?)?.toInt() ?? 38;
     }
     if (distanceKm <= 5) {
-      return (s['delivery_charge_4_5'] as num?)?.toInt() ?? 40;
+      return (s['rider_payout_4_5'] as num?)?.toInt() ?? 46;
     }
-    return (s['delivery_charge_5_plus'] as num?)?.toInt() ?? 50;
+    final base = (s['rider_payout_4_5'] as num?)?.toInt() ?? 46;
+    final perKm = (s['rider_payout_extra_per_km'] as num?)?.toInt() ?? 8;
+    final extraKm = (distanceKm - 5).ceil();
+    return base + (perKm * extraKm);
   }
 
   Future<int> getPlatformFee() async {
@@ -325,6 +377,11 @@ class OrderService {
       }
     }
 
+    // ✅ Rider payout — hamesha actual distance se fresh calculate hota hai
+    final int riderPayout = maxDistanceKm > 0
+        ? await getRiderPayout(maxDistanceKm)
+        : (distanceKm != null ? await getRiderPayout(distanceKm) : 0);
+
     final double subtotal = double.parse(cart.subtotal.toStringAsFixed(2));
     final double packagingFee = double.parse(
       cart.packagingFee.toStringAsFixed(2),
@@ -387,6 +444,8 @@ class OrderService {
           'subtotal': subtotal,
           'platform_fee': platformFee,
           'delivery_charge': deliveryCharge,
+          'customer_delivery_fee': deliveryCharge,
+          'rider_payout': riderPayout,
           'packaging_fee': packagingFee,
           'total': total,
           'tip_amount': tipAmount,
@@ -433,17 +492,18 @@ class OrderService {
         );
       }
 
-      // 2. Saare online riders ko notify karo
-      final onlineRiders = await _client
-          .from('riders')
-          .select('id')
-          .eq('is_available', true)
-          .eq('status', 'approved');
+      // 2. Saare online riders ko notify karo — device_tokens se direct
+      final riderTokens = await _client
+          .from('device_tokens')
+          .select('fcm_token')
+          .eq('user_type', 'rider')
+          .eq('is_active', true);
 
-      for (final rider in (onlineRiders as List)) {
-        final riderId = rider['id'] as String;
-        await PushNotificationSender.newOrderToRider(
-          riderId: riderId,
+      for (final rt in (riderTokens as List)) {
+        final token = rt['fcm_token'] as String?;
+        if (token == null || token.isEmpty) continue;
+        await PushNotificationSender.newOrderToRiderDirect(
+          fcmToken: token,
           orderShortId: shortId,
           amount: total,
           vendorName: vendor.name,
@@ -464,9 +524,15 @@ class OrderService {
     required String landmark,
     required String userPhone,
     int onlineDiscount = 0,
+    int offerDiscount = 0,
+    int cartThresholdDiscount = 0,
+    int deliveryDiscount =
+        0, // ✅ NEW — promo code ka delivery-specific discount
     bool applyPlatformFee = true,
     double? customerLat,
     double? customerLng,
+    String paymentMethod =
+        'cod', // 'cod' ya 'online' — checkout_screen se aata hai
   }) async {
     final userId = _client.auth.currentUser?.id;
     if (userId == null) throw Exception('User not logged in');
@@ -498,21 +564,36 @@ class OrderService {
       }
     } catch (_) {}
 
-    final int deliveryCharge = distKm > 0
-        ? await getDeliveryCharge(distKm)
-        : cart.deliveryCharge.round();
-
     // Sirf is vendor ke items ka subtotal
     final double subtotal = items.fold(0.0, (sum, ci) => sum + ci.totalPrice);
+
+    final int rawDeliveryCharge = distKm > 0
+        ? await getDeliveryCharge(distKm, subtotal: subtotal)
+        : cart.deliveryCharge.round();
+
+    // ✅ UPDATED: Promo discount sirf customer ke delivery_charge se
+    // minus hota hai. Rider payout hamesha poora milta hai — discount
+    // ka cost platform apne margin se absorb karta hai
+    final int deliveryCharge = (rawDeliveryCharge - deliveryDiscount) < 0
+        ? 0
+        : rawDeliveryCharge - deliveryDiscount;
+
+    final int riderPayout = distKm > 0 ? await getRiderPayout(distKm) : 0;
+    
+    // offerDiscount includes item discount AND deliveryDiscount.
+    // We subtract the full offerDiscount below because we are adding the rawDeliveryCharge.
+
     final double packagingFee = await getPackagingFee(subtotal);
     final int tipAmount = cart.tipAmount;
     final double total =
         subtotal +
         platformFee +
-        deliveryCharge +
+        rawDeliveryCharge + // Use raw delivery charge to calculate total, since discounts are subtracted at the end
         packagingFee +
         tipAmount -
-        onlineDiscount;
+        offerDiscount - // Full offer discount (item + delivery)
+        onlineDiscount - // Just online payment discount
+        cartThresholdDiscount;
 
     final otp = _generateOtp();
 
@@ -559,15 +640,19 @@ class OrderService {
           'items': itemsList,
           'subtotal': double.parse(subtotal.toStringAsFixed(2)),
           'platform_fee': platformFee,
-          'delivery_charge': deliveryCharge,
+          'delivery_charge': rawDeliveryCharge,
+          'customer_delivery_fee': rawDeliveryCharge,
+          'rider_payout': riderPayout,
           'packaging_fee': double.parse(packagingFee.toStringAsFixed(2)),
           'total': double.parse(total.toStringAsFixed(2)),
           'tip_amount': tipAmount,
           'status': 'placed',
           'address': address,
           'landmark': landmark,
-          'payment_method': 'cod',
+          'payment_method': paymentMethod,
           'online_discount': onlineDiscount,
+          'offer_discount': offerDiscount,
+          'discount_amount': cartThresholdDiscount,
           'delivery_otp': otp,
           'distance_km': distKm,
           'customer_lat': finalCustomerLat,
@@ -581,44 +666,68 @@ class OrderService {
 
     final placedOrder2 = OrderModel.fromMap(orderData);
 
-    try {
-      final shortId2 = placedOrder2.id
-          .substring(placedOrder2.id.length - 6)
-          .toUpperCase();
+    // ── COD: turant notify karo. Online: SKIP — checkout_screen payment
+    // confirm hone ke baad notifyAdminAndRiders() khud call karega ──
+    if (paymentMethod != 'online') {
+      await notifyAdminAndRiders(
+        orderId: placedOrder2.id,
+        vendorName: vendor.name,
+        amount: total,
+        deliveryCharge: deliveryCharge.toDouble(),
+      );
+    }
 
-      final adminData2 = await _client
+    return placedOrder2;
+  }
+
+  // ── Reusable: Admin + online riders ko naya order notify karo ──────
+  // COD ke liye yahi method placeOrderForVendor() ke andar se chalta hai.
+  // Online payment ke liye checkout_screen payment-success ke baad
+  // isko alag se call karta hai (per vendor order).
+  Future<void> notifyAdminAndRiders({
+    required String orderId,
+    required String vendorName,
+    required double amount,
+    double deliveryCharge = 15.0,
+  }) async {
+    try {
+      final shortId = orderId.substring(orderId.length - 6).toUpperCase();
+
+      final adminData = await _client
           .from('users')
           .select('id')
           .eq('role', 'admin')
           .limit(5);
 
-      for (final admin in (adminData2 as List)) {
+      for (final admin in (adminData as List)) {
         await PushNotificationSender.newOrderToAdmin(
           adminUserId: admin['id'] as String,
-          orderShortId: shortId2,
-          vendorName: vendor.name,
-          amount: total,
+          orderShortId: shortId,
+          vendorName: vendorName,
+          amount: amount,
         );
       }
 
-      final onlineRiders2 = await _client
-          .from('riders')
-          .select('id')
-          .eq('is_available', true)
-          .eq('status', 'approved');
+      final riderTokens = await _client
+          .from('device_tokens')
+          .select('fcm_token')
+          .eq('user_type', 'rider')
+          .eq('is_active', true);
 
-      for (final rider in (onlineRiders2 as List)) {
-        await PushNotificationSender.newOrderToRider(
-          riderId: rider['id'] as String,
-          orderShortId: shortId2,
-          amount: total,
-          vendorName: vendor.name,
-          deliveryCharge: deliveryCharge.toDouble(),
+      for (final rt in (riderTokens as List)) {
+        final token = rt['fcm_token'] as String?;
+        if (token == null || token.isEmpty) continue;
+        await PushNotificationSender.newOrderToRiderDirect(
+          fcmToken: token,
+          orderShortId: shortId,
+          amount: amount,
+          vendorName: vendorName,
+          deliveryCharge: deliveryCharge,
         );
       }
-    } catch (_) {}
-
-    return placedOrder2;
+    } catch (_) {
+      // Notification fail = order still placed, silent fail
+    }
   }
 
   Future<List<OrderModel>> getUserOrders() async {

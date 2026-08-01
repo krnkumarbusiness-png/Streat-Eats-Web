@@ -23,6 +23,7 @@ import '../services/menu_service.dart'; // ✅ FIX 1 — import added
 import 'vendor_detail_screen.dart';
 import 'search_screen.dart';
 import '../widgets/vendor_card.dart';
+import '../widgets/disclaimer_widget.dart';
 
 class _LC {
   static const background = Color(0xFFF7F5F2);
@@ -255,18 +256,40 @@ class _StreetFoodScreenState extends State<StreetFoodScreen>
       if (settingsData != null) {
         final slotsRaw = settingsData['time_slots'];
         if (slotsRaw != null) {
-          for (final slot in (slotsRaw as List)) {
-            final open = slot['open'] as String? ?? '';
-            final close = slot['close'] as String? ?? '';
-            if (open.isEmpty || close.isEmpty) continue;
-            final openHour = int.tryParse(open.split(':')[0]) ?? 0;
-            final closeHour = int.tryParse(close.split(':')[0]) ?? 0;
-            if (openHour < 14) {
-              VendorModel.morningStartHour = openHour;
-              VendorModel.morningEndHour = closeHour;
-            } else {
-              VendorModel.eveningStartHour = openHour;
-              VendorModel.eveningEndHour = closeHour;
+          final enabledSlots = (slotsRaw as List)
+              .map((s) => Map<String, dynamic>.from(s as Map))
+              .where(
+                (s) =>
+                    (s['enabled'] as bool? ?? true) &&
+                    (s['open'] as String? ?? '').isNotEmpty &&
+                    (s['close'] as String? ?? '').isNotEmpty,
+              )
+              .toList();
+
+          if (enabledSlots.length == 1) {
+            // ✅ Single global slot — morning aur evening dono isi se set honge
+            final s = enabledSlots.first;
+            final openHour =
+                int.tryParse((s['open'] as String).split(':')[0]) ?? 0;
+            final closeHour =
+                int.tryParse((s['close'] as String).split(':')[0]) ?? 0;
+            VendorModel.morningStartHour = openHour;
+            VendorModel.morningEndHour = closeHour;
+            VendorModel.eveningStartHour = openHour;
+            VendorModel.eveningEndHour = closeHour;
+          } else {
+            for (final slot in enabledSlots) {
+              final open = slot['open'] as String;
+              final close = slot['close'] as String;
+              final openHour = int.tryParse(open.split(':')[0]) ?? 0;
+              final closeHour = int.tryParse(close.split(':')[0]) ?? 0;
+              if (openHour < 14) {
+                VendorModel.morningStartHour = openHour;
+                VendorModel.morningEndHour = closeHour;
+              } else {
+                VendorModel.eveningStartHour = openHour;
+                VendorModel.eveningEndHour = closeHour;
+              }
             }
           }
         }
@@ -511,6 +534,8 @@ class _StreetFoodScreenState extends State<StreetFoodScreen>
               ),
 
             const SliverToBoxAdapter(child: SizedBox(height: 16)),
+            const SliverToBoxAdapter(child: DisclaimerWidget()),
+            const SliverToBoxAdapter(child: SizedBox(height: 80)),
           ],
         ),
       ),
@@ -756,7 +781,7 @@ class _StreetFoodHeaderDelegate extends SliverPersistentHeaderDelegate {
     required this.menuItemsMap, // ✅ FIX 8 — required
   });
 
-  static const double _headerContentHeight = 106.0;
+  static const double _headerContentHeight = 72.0;
 
   @override
   double get minExtent => topPadding + _headerContentHeight;
@@ -779,16 +804,12 @@ class _StreetFoodHeaderDelegate extends SliverPersistentHeaderDelegate {
   ) {
     return Container(
       height: topPadding + _headerContentHeight,
-      decoration: BoxDecoration(
-        color: _LC.surface,
-        border: const Border(bottom: BorderSide(color: _LC.border, width: 1)),
-        boxShadow: [
-          BoxShadow(
-            color: Colors.black.withOpacity(0.05),
-            blurRadius: 6,
-            offset: const Offset(0, 2),
-          ),
-        ],
+      decoration: const BoxDecoration(
+        gradient: LinearGradient(
+          begin: Alignment.topCenter,
+          end: Alignment.bottomCenter,
+          colors: [Color(0xFFFF6B35), Color(0xFFFF8C5A)],
+        ),
       ),
       child: Padding(
         padding: EdgeInsets.fromLTRB(16, topPadding + 12, 16, 12),
@@ -804,7 +825,7 @@ class _StreetFoodHeaderDelegate extends SliverPersistentHeaderDelegate {
                   child: Text(
                     'Street Food',
                     style: TextStyle(
-                      color: _LC.textPrimary,
+                      color: Colors.white,
                       fontSize: 20,
                       fontWeight: FontWeight.w800,
                       fontFamily: 'Poppins',
@@ -817,13 +838,9 @@ class _StreetFoodHeaderDelegate extends SliverPersistentHeaderDelegate {
                     vertical: 5,
                   ),
                   decoration: BoxDecoration(
-                    color: isAppActive ? _LC.greenLight : _LC.redLight,
+                    color: Colors.white.withOpacity(0.20),
                     borderRadius: BorderRadius.circular(20),
-                    border: Border.all(
-                      color: isAppActive
-                          ? _LC.green.withOpacity(0.3)
-                          : _LC.red.withOpacity(0.3),
-                    ),
+                    border: Border.all(color: Colors.white.withOpacity(0.35)),
                   ),
                   child: Row(
                     mainAxisSize: MainAxisSize.min,
@@ -839,8 +856,8 @@ class _StreetFoodHeaderDelegate extends SliverPersistentHeaderDelegate {
                       const SizedBox(width: 5),
                       Text(
                         isAppActive ? 'Open' : 'Closed',
-                        style: TextStyle(
-                          color: isAppActive ? _LC.green : _LC.red,
+                        style: const TextStyle(
+                          color: Colors.white,
                           fontSize: 11,
                           fontWeight: FontWeight.w700,
                           fontFamily: 'Poppins',
@@ -851,67 +868,7 @@ class _StreetFoodHeaderDelegate extends SliverPersistentHeaderDelegate {
                 ),
               ],
             ),
-            const SizedBox(height: 10),
-            // ✅ FIX 10 — SearchScreen ko vendorMenuItems pass karo
-            Builder(
-              builder: (ctx) {
-                return GestureDetector(
-                  onTap: () => Navigator.push(
-                    ctx,
-                    PageRouteBuilder(
-                      pageBuilder: (_, anim, __) => SearchScreen(
-                        vendors: allVendors,
-                        vendorMenuItems: menuItemsMap, // ✅ THE KEY FIX
-                      ),
-                      transitionsBuilder: (_, anim, __, child) =>
-                          SlideTransition(
-                            position:
-                                Tween<Offset>(
-                                  begin: const Offset(0, 0.05),
-                                  end: Offset.zero,
-                                ).animate(
-                                  CurvedAnimation(
-                                    parent: anim,
-                                    curve: Curves.easeOut,
-                                  ),
-                                ),
-                            child: FadeTransition(opacity: anim, child: child),
-                          ),
-                      transitionDuration: const Duration(milliseconds: 280),
-                    ),
-                  ),
-                  child: Container(
-                    padding: const EdgeInsets.symmetric(
-                      horizontal: 14,
-                      vertical: 10,
-                    ),
-                    decoration: BoxDecoration(
-                      color: _LC.background,
-                      borderRadius: BorderRadius.circular(12),
-                      border: Border.all(color: _LC.border),
-                    ),
-                    child: const Row(
-                      children: [
-                        Icon(
-                          Icons.search_rounded,
-                          color: _LC.textMuted,
-                          size: 17,
-                        ),
-                        SizedBox(width: 10),
-                        Text(
-                          'Search street food...',
-                          style: TextStyle(
-                            color: _LC.textMuted,
-                            fontSize: 13,
-                            fontFamily: 'Poppins',
-                          ),
-                        ),
-                      ],
-                    ),
-                  ),
-                );
-              },
-            ),
+
           ],
         ),
       ),

@@ -13,6 +13,7 @@ import '../constants/styles.dart';
 import '../models/menu_item_model.dart';
 import '../models/vendor_model.dart';
 import '../providers/cart_provider.dart';
+import '../utils/cart_utils.dart';
 import '../screens/item_detail_screen.dart';
 
 class MenuItemCard extends StatelessWidget {
@@ -82,6 +83,7 @@ class MenuItemCard extends StatelessWidget {
         item.isDiscounted &&
         item.originalPrice != null &&
         item.discountPercent > 0;
+    final hasImage = item.imageUrl != null && item.imageUrl!.isNotEmpty;
 
     final cart = context.watch<CartProvider>();
     final totalQty = cart.getTotalQuantity(item.id);
@@ -98,302 +100,338 @@ class MenuItemCard extends StatelessWidget {
         );
       },
       child: Container(
-        decoration: const BoxDecoration(color: AppColors.surface),
+        decoration: BoxDecoration(
+          color: AppColors.surface,
+          borderRadius: BorderRadius.circular(16),
+          border: Border.all(color: const Color(0xFFEEEEEE), width: 0.8),
+          boxShadow: [
+            BoxShadow(
+              color: Colors.black.withOpacity(0.05),
+              blurRadius: 8,
+              offset: const Offset(0, 2),
+            ),
+          ],
+        ),
         child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          mainAxisSize: MainAxisSize.min,
           children: [
-            Padding(
-              padding: const EdgeInsets.fromLTRB(16, 16, 16, 16),
-              child: Row(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Expanded(
-                    flex: 7,
-                    child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                        _VegDot(isVeg: item.isVeg),
-                        const SizedBox(height: 6),
-                        Text(
-                          item.name,
-                          style: AppStyles.cardTitle.copyWith(
-                            fontSize: 15,
-                            color: isSoldOut
-                                ? AppColors.textMuted
-                                : AppColors.textPrimary,
-                          ),
-                          maxLines: 2,
-                          overflow: TextOverflow.ellipsis,
-                        ),
-                        if (item.tag != null && item.tag!.isNotEmpty) ...[
-                          const SizedBox(height: 5),
-                          _TagChip(tag: item.tag!),
-                        ],
-                        const SizedBox(height: 6),
-                        if (item.hasHalfFull &&
-                            item.halfPrice != null &&
-                            item.fullPrice != null)
-                          _HalfFullPriceRow(item: item, isSoldOut: isSoldOut)
-                        else
-                          Row(
-                            crossAxisAlignment: CrossAxisAlignment.end,
-                            children: [
-                              Text(
-                                '₹${item.appPrice.toStringAsFixed(0)}',
-                                style: AppStyles.priceText.copyWith(
-                                  fontSize: 16,
-                                  fontWeight: FontWeight.w800,
-                                  color: isSoldOut
-                                      ? AppColors.textMuted
-                                      : hasDiscount
-                                      ? AppColors.error
-                                      : AppColors.primary,
-                                ),
-                              ),
-                              if (hasDiscount) ...[
-                                const SizedBox(width: 6),
-                                Text(
-                                  '₹${item.originalPrice!.toStringAsFixed(0)}',
-                                  style: const TextStyle(
-                                    color: AppColors.textMuted,
-                                    fontSize: 12,
-                                    fontFamily: 'Poppins',
-                                    decoration: TextDecoration.lineThrough,
-                                    decorationColor: AppColors.textMuted,
-                                  ),
-                                ),
-                              ],
-                            ],
-                          ),
-                        if (item.description.isNotEmpty) ...[
-                          const SizedBox(height: 5),
-                          GestureDetector(
-                            onTap: () {
-                              if (isSoldOut) return;
-                              Navigator.push(
-                                context,
-                                MaterialPageRoute(
-                                  builder: (_) => ItemDetailScreen(
-                                    item: item,
-                                    vendor: vendor,
-                                  ),
-                                ),
-                              );
-                            },
-                            child: RichText(
-                              maxLines: 2,
-                              overflow: TextOverflow.ellipsis,
-                              text: TextSpan(
-                                text: item.description,
-                                style: const TextStyle(
-                                  color: AppColors.textMuted,
-                                  fontSize: 12,
-                                  fontFamily: 'Poppins',
-                                  height: 1.4,
-                                ),
-                                children: const [
-                                  TextSpan(
-                                    text: ' ...more',
-                                    style: TextStyle(
-                                      color: AppColors.primary,
-                                      fontWeight: FontWeight.w600,
-                                    ),
-                                  ),
-                                ],
-                              ),
-                            ),
-                          ),
-                        ],
-                        if (isLowStock && !isSoldOut) ...[
-                          const SizedBox(height: 6),
-                          Container(
-                            padding: const EdgeInsets.symmetric(
-                              horizontal: 7,
-                              vertical: 3,
-                            ),
-                            decoration: BoxDecoration(
-                              color: AppColors.warning.withOpacity(0.1),
-                              borderRadius: BorderRadius.circular(5),
-                              border: Border.all(
-                                color: AppColors.warning.withOpacity(0.35),
-                              ),
-                            ),
-                            child: const Text(
-                              'Low Stock',
-                              style: TextStyle(
-                                fontSize: 10,
-                                fontWeight: FontWeight.w700,
-                                color: AppColors.warning,
-                                fontFamily: 'Poppins',
-                              ),
-                            ),
-                          ),
-                        ],
-                      ],
-                    ),
-                  ),
-                  const SizedBox(width: 12),
-                  SizedBox(
-                    width: 104,
-                    child: Stack(
-                      clipBehavior: Clip.none,
-                      alignment: Alignment.bottomCenter,
-                      children: [
-                        ClipRRect(
-                          borderRadius: BorderRadius.circular(12),
-                          child: ColorFiltered(
+            // ── Image ──────────────────────────────────────
+            SizedBox(
+              height: 160,
+              child: ClipRRect(
+                borderRadius: const BorderRadius.vertical(
+                  top: Radius.circular(15),
+                ),
+                child: Stack(
+                  fit: StackFit.expand,
+                  children: [
+                    hasImage
+                        ? ColorFiltered(
                             colorFilter: isSoldOut
                                 ? const ColorFilter.matrix([
-                                    0.2126,
-                                    0.7152,
-                                    0.0722,
-                                    0,
-                                    0,
-                                    0.2126,
-                                    0.7152,
-                                    0.0722,
-                                    0,
-                                    0,
-                                    0.2126,
-                                    0.7152,
-                                    0.0722,
-                                    0,
-                                    0,
-                                    0,
-                                    0,
-                                    0,
-                                    1,
-                                    0,
+                                    0.2126, 0.7152, 0.0722, 0, 0,
+                                    0.2126, 0.7152, 0.0722, 0, 0,
+                                    0.2126, 0.7152, 0.0722, 0, 0,
+                                    0, 0, 0, 1, 0,
                                   ])
                                 : const ColorFilter.mode(
-                                    Colors.transparent,
-                                    BlendMode.multiply,
+                                    Colors.transparent, BlendMode.multiply,
                                   ),
-                            child: item.imageUrl != null
-                                ? CachedNetworkImage(
-                                    imageUrl: item.imageUrl!,
-                                    width: 104,
-                                    height: 104,
-                                    fit: BoxFit.cover,
-                                    placeholder: (_, __) => _imagePlaceholder(),
-                                    errorWidget: (_, __, ___) =>
-                                        _imagePlaceholder(),
-                                  )
-                                : _imagePlaceholder(),
+                            child: CachedNetworkImage(
+                              imageUrl: item.imageUrl!,
+                              fit: BoxFit.cover,
+                              errorWidget: (_, __, ___) => _imagePlaceholder(),
+                            ),
+                          )
+                        : _imagePlaceholder(),
+
+                    if (isSoldOut)
+                      Positioned.fill(
+                        child: Container(
+                          color: Colors.black.withOpacity(0.38),
+                          child: const Center(
+                            child: Text(
+                              "Sold\nOut",
+                              textAlign: TextAlign.center,
+                              style: TextStyle(
+                                color: Colors.white,
+                                fontSize: 14,
+                                fontWeight: FontWeight.w800,
+                                fontFamily: 'Poppins',
+                                height: 1.2,
+                              ),
+                            ),
                           ),
                         ),
-                        if (isSoldOut)
-                          Positioned.fill(
-                            child: Container(
-                              decoration: BoxDecoration(
-                                color: Colors.black.withOpacity(0.38),
-                                borderRadius: BorderRadius.circular(12),
-                              ),
-                              child: const Center(
-                                child: Text(
-                                  'Sold\nOut',
-                                  textAlign: TextAlign.center,
-                                  style: TextStyle(
+                      ),
+
+                    // Veg / Non-veg indicator dot
+                    Positioned(
+                      top: 8,
+                      left: 8,
+                      child: Container(
+                        width: 22,
+                        height: 22,
+                        decoration: BoxDecoration(
+                          color: Colors.white,
+                          borderRadius: BorderRadius.circular(4),
+                          border: Border.all(
+                            color: Colors.white,
+                            width: 1.5,
+                          ),
+                        ),
+                        child: Center(
+                          child: Container(
+                            width: 12,
+                            height: 12,
+                            decoration: BoxDecoration(
+                              color: item.isVeg
+                                  ? const Color(0xFF16A34A)
+                                  : const Color(0xFFDC2626),
+                              shape: BoxShape.circle,
+                            ),
+                          ),
+                        ),
+                      ),
+                    ),
+
+                    // OFF badge
+                    if (hasDiscount && !isSoldOut)
+                      Positioned(
+                        bottom: 8,
+                        left: 8,
+                        child: Container(
+                          padding: const EdgeInsets.symmetric(
+                            horizontal: 8,
+                            vertical: 3,
+                          ),
+                          decoration: BoxDecoration(
+                            color: const Color(0xFF16A34A),
+                            borderRadius: BorderRadius.circular(6),
+                          ),
+                          child: Text(
+                            "₹${(item.originalPrice! - item.appPrice).toStringAsFixed(0)} OFF",
+                            style: const TextStyle(
+                              color: Colors.white,
+                              fontSize: 9,
+                              fontWeight: FontWeight.w800,
+                              fontFamily: 'Poppins',
+                            ),
+                          ),
+                        ),
+                      ),
+
+                    // Add / Quantity buttons
+                    if (!isSoldOut)
+                      Positioned(
+                        bottom: 8,
+                        right: 8,
+                        child: totalQty == 0
+                            ? GestureDetector(
+                                onTap: () async {
+                                  if (item.hasHalfFull) {
+                                    _showPortionSheet(context);
+                                  } else {
+                                    HapticFeedback.mediumImpact();
+                                    CartUtils.handleCartAddItem(context, item, vendor);
+                                    await Future.delayed(const Duration(milliseconds: 300));
+                                    if (context.mounted) {
+                                      await _triggerUpsellIfNeeded(context);
+                                    }
+                                  }
+                                },
+                                child: Container(
+                                  padding: const EdgeInsets.symmetric(
+                                    horizontal: 12,
+                                    vertical: 6,
+                                  ),
+                                  decoration: BoxDecoration(
                                     color: Colors.white,
-                                    fontSize: 12,
-                                    fontWeight: FontWeight.w800,
-                                    fontFamily: 'Poppins',
-                                    height: 1.2,
+                                    borderRadius: BorderRadius.circular(8),
+                                    border: Border.all(
+                                      color: const Color(0xFF16A34A),
+                                      width: 1.5,
+                                    ),
+                                    boxShadow: [
+                                      BoxShadow(
+                                        color: Colors.black.withOpacity(0.2),
+                                        blurRadius: 6,
+                                        offset: const Offset(0, 2),
+                                      ),
+                                    ],
+                                  ),
+                                  child: const Text(
+                                    "Add +",
+                                    style: TextStyle(
+                                      fontFamily: 'Poppins',
+                                      fontSize: 13,
+                                      fontWeight: FontWeight.w800,
+                                      color: Color(0xFF16A34A),
+                                    ),
                                   ),
                                 ),
-                              ),
-                            ),
-                          ),
-                        if (hasDiscount)
-                          Positioned(
-                            top: 0,
-                            left: 0,
-                            child: Container(
-                              padding: const EdgeInsets.symmetric(
-                                horizontal: 6,
-                                vertical: 3,
-                              ),
-                              decoration: const BoxDecoration(
-                                color: AppColors.error,
-                                borderRadius: BorderRadius.only(
-                                  topLeft: Radius.circular(12),
-                                  bottomRight: Radius.circular(8),
-                                ),
-                              ),
-                              child: Text(
-                                '${item.discountPercent}% OFF',
-                                style: const TextStyle(
-                                  color: Colors.white,
-                                  fontSize: 9,
-                                  fontWeight: FontWeight.w800,
-                                  fontFamily: 'Poppins',
-                                ),
-                              ),
-                            ),
-                          ),
-                        if (!isSoldOut)
-                          Positioned(
-                            bottom: -14,
-                            child: totalQty == 0
-                                ? _AddButton(
-                                    onTap: () async {
-                                      if (item.hasHalfFull) {
-                                        _showPortionSheet(context);
-                                      } else {
-                                        HapticFeedback.mediumImpact();
-                                        context.read<CartProvider>().addItem(
-                                          item,
-                                          vendor,
-                                        );
-                                        await Future.delayed(
-                                          const Duration(milliseconds: 300),
-                                        );
-                                        if (context.mounted) {
-                                          await _triggerUpsellIfNeeded(context);
-                                        }
-                                      }
-                                    },
-                                  )
-                                : item.hasHalfFull
+                              )
+                            : item.hasHalfFull
                                 ? _HalfFullQtyBadge(
                                     totalQty: totalQty,
                                     onTap: () => _showPortionSheet(context),
                                   )
-                                : _QuantityControl(
-                                    quantity: totalQty,
-                                    onAdd: () {
-                                      HapticFeedback.selectionClick();
-                                      context.read<CartProvider>().addItem(
-                                        item,
-                                        vendor,
-                                      );
-                                    },
-                                    onRemove: () {
-                                      HapticFeedback.selectionClick();
-                                      context.read<CartProvider>().removeItem(
-                                        item.id,
-                                      );
-                                    },
+                                : Container(
+                                    decoration: BoxDecoration(
+                                      color: Colors.white,
+                                      borderRadius: BorderRadius.circular(8),
+                                      border: Border.all(
+                                        color: const Color(0xFF16A34A),
+                                        width: 1.5,
+                                      ),
+                                      boxShadow: [
+                                        BoxShadow(
+                                          color: Colors.black.withOpacity(0.2),
+                                          blurRadius: 6,
+                                          offset: const Offset(0, 2),
+                                        ),
+                                      ],
+                                    ),
+                                    child: _QuantityControl(
+                                      quantity: totalQty,
+                                      onAdd: () {
+                                        HapticFeedback.selectionClick();
+                                        CartUtils.handleCartAddItem(context, item, vendor);
+                                      },
+                                      onRemove: () {
+                                        HapticFeedback.selectionClick();
+                                        context.read<CartProvider>().removeItem(item.id);
+                                      },
+                                    ),
                                   ),
-                          ),
-                      ],
-                    ),
-                  ),
-                ],
+                      ),
+                  ],
+                ),
               ),
             ),
-            const SizedBox(height: 14),
-            const Divider(
-              height: 1,
-              color: AppColors.border,
-              indent: 16,
-              endIndent: 16,
+
+            // ── Info ───────────────────────────────────────
+            Padding(
+              padding: const EdgeInsets.fromLTRB(10, 8, 10, 10),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  Text(
+                    item.name,
+                    style: TextStyle(
+                      fontFamily: 'Poppins',
+                      fontSize: 13,
+                      fontWeight: FontWeight.w800,
+                      color: isSoldOut ? AppColors.textMuted : AppColors.textPrimary,
+                      height: 1.2,
+                    ),
+                    maxLines: 2,
+                    overflow: TextOverflow.ellipsis,
+                  ),
+
+                  if (item.tag != null && item.tag!.isNotEmpty) ...[
+                    const SizedBox(height: 5),
+                    _TagChip(tag: item.tag!),
+                  ],
+                  if (isLowStock && !isSoldOut) ...[
+                    const SizedBox(height: 5),
+                    Container(
+                      padding: const EdgeInsets.symmetric(horizontal: 7, vertical: 3),
+                      decoration: BoxDecoration(
+                        color: AppColors.warning.withOpacity(0.1),
+                        borderRadius: BorderRadius.circular(5),
+                        border: Border.all(color: AppColors.warning.withOpacity(0.35)),
+                      ),
+                      child: const Text(
+                        "Low Stock",
+                        style: TextStyle(
+                          fontSize: 10,
+                          fontWeight: FontWeight.w700,
+                          color: AppColors.warning,
+                          fontFamily: 'Poppins',
+                        ),
+                      ),
+                    ),
+                  ],
+
+                  const SizedBox(height: 6),
+
+                  if (item.hasHalfFull && item.halfPrice != null && item.fullPrice != null)
+                    _HalfFullPriceRow(item: item, isSoldOut: isSoldOut)
+                  else
+                    Row(
+                      crossAxisAlignment: CrossAxisAlignment.center,
+                      children: [
+                        if (hasDiscount && !isSoldOut) ...[
+                          Container(
+                            padding: const EdgeInsets.symmetric(
+                              horizontal: 6,
+                              vertical: 2,
+                            ),
+                            decoration: BoxDecoration(
+                              color: const Color(0xFFDCFCE7),
+                              borderRadius: BorderRadius.circular(6),
+                              border: Border.all(
+                                color: const Color(0xFF16A34A),
+                                width: 1,
+                              ),
+                            ),
+                            child: Text(
+                              "₹${(item.originalPrice! - item.appPrice).toStringAsFixed(0)} OFF",
+                              style: const TextStyle(
+                                fontFamily: 'Poppins',
+                                fontSize: 9,
+                                fontWeight: FontWeight.w700,
+                                color: Color(0xFF16A34A),
+                              ),
+                            ),
+                          ),
+                          const SizedBox(width: 6),
+                        ],
+                        Container(
+                          padding: const EdgeInsets.symmetric(
+                            horizontal: 8,
+                            vertical: 4,
+                          ),
+                          decoration: BoxDecoration(
+                            color: isSoldOut ? AppColors.textMuted : const Color(0xFF16A34A),
+                            borderRadius: BorderRadius.circular(7),
+                          ),
+                          child: Text(
+                            "₹${item.appPrice.toStringAsFixed(0)}",
+                            style: const TextStyle(
+                              fontFamily: 'Poppins',
+                              fontSize: 13,
+                              fontWeight: FontWeight.w800,
+                              color: Colors.white,
+                            ),
+                          ),
+                        ),
+                        if (hasDiscount && !isSoldOut) ...[
+                          const SizedBox(width: 5),
+                          Text(
+                            "₹${item.originalPrice!.toStringAsFixed(0)}",
+                            style: const TextStyle(
+                              fontFamily: 'Poppins',
+                              fontSize: 11,
+                              color: AppColors.textMuted,
+                              decoration: TextDecoration.lineThrough,
+                              decorationColor: AppColors.textMuted,
+                            ),
+                          ),
+                        ],
+                      ],
+                    ),
+                ],
+              ),
             ),
           ],
         ),
       ),
     );
   }
-
   Widget _imagePlaceholder() {
     return Container(
       width: 104,
@@ -643,7 +681,7 @@ class _PortionBottomSheet extends StatelessWidget {
             qty: halfQty,
             onAdd: () {
               HapticFeedback.selectionClick();
-              context.read<CartProvider>().addItem(
+              CartUtils.handleCartAddItem(context, 
                 item,
                 vendor,
                 portionType: 'half',
@@ -667,7 +705,7 @@ class _PortionBottomSheet extends StatelessWidget {
             qty: fullQty,
             onAdd: () {
               HapticFeedback.selectionClick();
-              context.read<CartProvider>().addItem(
+              CartUtils.handleCartAddItem(context, 
                 item,
                 vendor,
                 portionType: 'full',
@@ -811,9 +849,8 @@ class _PortionRow extends StatelessWidget {
                     height: 32,
                     padding: const EdgeInsets.symmetric(horizontal: 16),
                     decoration: BoxDecoration(
-                      color: AppColors.surface,
+                      color: const Color(0xFF16A34A),
                       borderRadius: BorderRadius.circular(8),
-                      border: Border.all(color: AppColors.primary, width: 1.5),
                       boxShadow: [
                         BoxShadow(
                           color: Colors.black.withOpacity(0.08),
@@ -828,7 +865,7 @@ class _PortionRow extends StatelessWidget {
                         Text(
                           'ADD',
                           style: TextStyle(
-                            color: AppColors.primary,
+                            color: Colors.white,
                             fontWeight: FontWeight.w800,
                             fontSize: 12,
                             fontFamily: 'Poppins',
@@ -837,7 +874,7 @@ class _PortionRow extends StatelessWidget {
                         SizedBox(width: 3),
                         Icon(
                           Icons.add_rounded,
-                          color: AppColors.primary,
+                          color: Colors.white,
                           size: 14,
                         ),
                       ],
@@ -847,8 +884,9 @@ class _PortionRow extends StatelessWidget {
               : Container(
                   height: 32,
                   decoration: BoxDecoration(
-                    color: AppColors.primary,
+                    color: const Color(0xFFDCFCE7),
                     borderRadius: BorderRadius.circular(8),
+                    border: Border.all(color: const Color(0xFF16A34A), width: 1.5),
                   ),
                   child: Row(
                     mainAxisSize: MainAxisSize.min,
@@ -861,7 +899,7 @@ class _PortionRow extends StatelessWidget {
                           child: Center(
                             child: Icon(
                               Icons.remove_rounded,
-                              color: Colors.white,
+                              color: Color(0xFF16A34A),
                               size: 16,
                             ),
                           ),
@@ -872,7 +910,7 @@ class _PortionRow extends StatelessWidget {
                         child: Text(
                           '$qty',
                           style: const TextStyle(
-                            color: Colors.white,
+                            color: Color(0xFF16A34A),
                             fontWeight: FontWeight.w800,
                             fontSize: 14,
                             fontFamily: 'Poppins',
@@ -887,7 +925,7 @@ class _PortionRow extends StatelessWidget {
                           child: Center(
                             child: Icon(
                               Icons.add_rounded,
-                              color: Colors.white,
+                              color: Color(0xFF16A34A),
                               size: 16,
                             ),
                           ),
@@ -984,9 +1022,8 @@ class _AddButton extends StatelessWidget {
         height: 32,
         padding: const EdgeInsets.symmetric(horizontal: 20),
         decoration: BoxDecoration(
-          color: AppColors.surface,
+          color: const Color(0xFF16A34A),
           borderRadius: BorderRadius.circular(8),
-          border: Border.all(color: AppColors.primary, width: 1.5),
           boxShadow: [
             BoxShadow(
               color: Colors.black.withOpacity(0.10),
@@ -1001,7 +1038,7 @@ class _AddButton extends StatelessWidget {
             Text(
               'ADD',
               style: TextStyle(
-                color: AppColors.primary,
+                color: Colors.white,
                 fontWeight: FontWeight.w800,
                 fontSize: 13,
                 fontFamily: 'Poppins',
@@ -1009,7 +1046,7 @@ class _AddButton extends StatelessWidget {
               ),
             ),
             SizedBox(width: 4),
-            Icon(Icons.add_rounded, color: AppColors.primary, size: 16),
+            Icon(Icons.add_rounded, color: Colors.white, size: 16),
           ],
         ),
       ),
@@ -1033,15 +1070,9 @@ class _QuantityControl extends StatelessWidget {
       duration: const Duration(milliseconds: 200),
       height: 32,
       decoration: BoxDecoration(
-        color: AppColors.primary,
+        color: const Color(0xFFDCFCE7),
         borderRadius: BorderRadius.circular(8),
-        boxShadow: [
-          BoxShadow(
-            color: AppColors.primary.withOpacity(0.35),
-            blurRadius: 8,
-            offset: const Offset(0, 3),
-          ),
-        ],
+        border: Border.all(color: const Color(0xFF16A34A), width: 1.5),
       ),
       child: Row(
         mainAxisSize: MainAxisSize.min,
@@ -1059,7 +1090,7 @@ class _QuantityControl extends StatelessWidget {
               ),
               child: const Icon(
                 Icons.remove_rounded,
-                color: Colors.white,
+                color: Color(0xFF16A34A),
                 size: 16,
               ),
             ),
@@ -1069,7 +1100,7 @@ class _QuantityControl extends StatelessWidget {
             child: Text(
               '$quantity',
               style: const TextStyle(
-                color: Colors.white,
+                color: Color(0xFF16A34A),
                 fontWeight: FontWeight.w800,
                 fontSize: 14,
                 fontFamily: 'Poppins',
@@ -1089,7 +1120,7 @@ class _QuantityControl extends StatelessWidget {
               ),
               child: const Icon(
                 Icons.add_rounded,
-                color: Colors.white,
+                color: Color(0xFF16A34A),
                 size: 16,
               ),
             ),
@@ -1329,7 +1360,7 @@ class _UpsellPopupCard extends StatelessWidget {
                         ? GestureDetector(
                             onTap: () {
                               HapticFeedback.selectionClick();
-                              context.read<CartProvider>().addItem(
+                              CartUtils.handleCartAddItem(context, 
                                 item,
                                 vendor,
                               );
@@ -1340,7 +1371,7 @@ class _UpsellPopupCard extends StatelessWidget {
                                 vertical: 4,
                               ),
                               decoration: BoxDecoration(
-                                color: AppColors.primary,
+                                color: const Color(0xFF16A34A),
                                 borderRadius: BorderRadius.circular(8),
                               ),
                               child: const Text(
@@ -1357,8 +1388,9 @@ class _UpsellPopupCard extends StatelessWidget {
                         : Container(
                             height: 28,
                             decoration: BoxDecoration(
-                              color: AppColors.primary,
+                              color: const Color(0xFFDCFCE7),
                               borderRadius: BorderRadius.circular(8),
+                              border: Border.all(color: const Color(0xFF16A34A), width: 1.5),
                             ),
                             child: Row(
                               mainAxisSize: MainAxisSize.min,
@@ -1376,7 +1408,7 @@ class _UpsellPopupCard extends StatelessWidget {
                                     child: Center(
                                       child: Icon(
                                         Icons.remove_rounded,
-                                        color: Colors.white,
+                                        color: Color(0xFF16A34A),
                                         size: 14,
                                       ),
                                     ),
@@ -1389,7 +1421,7 @@ class _UpsellPopupCard extends StatelessWidget {
                                   child: Text(
                                     '$qty',
                                     style: const TextStyle(
-                                      color: Colors.white,
+                                      color: Color(0xFF16A34A),
                                       fontSize: 13,
                                       fontWeight: FontWeight.w800,
                                       fontFamily: 'Poppins',
@@ -1399,7 +1431,7 @@ class _UpsellPopupCard extends StatelessWidget {
                                 GestureDetector(
                                   onTap: () {
                                     HapticFeedback.selectionClick();
-                                    context.read<CartProvider>().addItem(
+                                    CartUtils.handleCartAddItem(context, 
                                       item,
                                       vendor,
                                     );
@@ -1410,7 +1442,7 @@ class _UpsellPopupCard extends StatelessWidget {
                                     child: Center(
                                       child: Icon(
                                         Icons.add_rounded,
-                                        color: Colors.white,
+                                        color: Color(0xFF16A34A),
                                         size: 14,
                                       ),
                                     ),

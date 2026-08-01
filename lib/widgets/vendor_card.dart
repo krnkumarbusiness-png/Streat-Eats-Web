@@ -37,7 +37,7 @@ import 'package:supabase_flutter/supabase_flutter.dart';
 import '../models/menu_item_model.dart';
 import '../models/vendor_model.dart';
 import '../providers/cart_provider.dart';
-import '../constants/eta_helper.dart';
+import '../utils/cart_utils.dart';
 
 // ─── Local theme constants ────────────────────────────────────
 class _VC {
@@ -129,7 +129,11 @@ class _VendorCardState extends State<VendorCard> {
   @override
   void initState() {
     super.initState();
-    _fetchItems();
+    if (widget.layout == 'grid') {
+      _fetchItems();
+    } else {
+      _loadingItems = false;
+    }
   }
 
   Future<void> _fetchItems() async {
@@ -189,154 +193,33 @@ class _VendorCardState extends State<VendorCard> {
   String _deliveryText() {
     final km = widget.vendor.distanceKm;
     if (km == null) return 'Free Delivery';
-    if (km <= 1.0) return 'Free Delivery';
-    if (km <= 2.0) return '+₹10 delivery';
-    if (km <= 3.0) return '+₹20 delivery';
-    return '+₹30 delivery';
+    final charge = context.read<CartProvider>().calculateDeliveryCharge(km);
+    if (charge <= 0) return 'Free Delivery';
+    return '+₹${charge.toStringAsFixed(0)} delivery';
   }
 
-  // ── Add to cart ─────────────────────────────────────────────
-  Future<void> _addToCart(MenuItemModel item) async {
+  void _addToCart(MenuItemModel item) {
     HapticFeedback.lightImpact();
-    final cart = context.read<CartProvider>();
-    final currentVendor = cart.currentVendor;
-
-    if (currentVendor != null && currentVendor.id != widget.vendor.id) {
-      // Different vendor — show confirm dialog
-      final confirm = await _showClearCartDialog(currentVendor.name);
-      if (!confirm) return;
-      cart.forceAddItem(item, widget.vendor);
-    } else {
-      final added = cart.addItem(item, widget.vendor);
-      if (!added && mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(
-            content: Text('Cart limit reached or max order value exceeded'),
-            backgroundColor: _VC.error,
-          ),
-        );
-        return;
-      }
-    }
-
-    if (mounted) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(
-          content: Text('${item.name} added to cart ✓'),
-          backgroundColor: _VC.success,
-          duration: const Duration(seconds: 1),
-          behavior: SnackBarBehavior.floating,
-          shape: RoundedRectangleBorder(
-            borderRadius: BorderRadius.circular(10),
-          ),
-        ),
-      );
-    }
-  }
-
-  Future<bool> _showClearCartDialog(String currentVendorName) async {
-    final result = await showDialog<bool>(
-      context: context,
-      barrierDismissible: false,
-      builder: (ctx) => Dialog(
-        backgroundColor: Colors.transparent,
-        child: Container(
-          padding: const EdgeInsets.all(24),
-          decoration: BoxDecoration(
-            color: _VC.surface,
-            borderRadius: BorderRadius.circular(20),
-            border: Border.all(color: _VC.border),
-          ),
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              Container(
-                width: 52,
-                height: 52,
-                decoration: BoxDecoration(
-                  color: const Color(0xFFFEF3C7),
-                  shape: BoxShape.circle,
-                ),
-                child: const Center(
-                  child: Text('🛒', style: TextStyle(fontSize: 26)),
-                ),
+    CartUtils.handleCartAddItem(
+      context,
+      item,
+      widget.vendor,
+      onSuccess: () {
+        if (mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(
+              content: Text('${item.name} added to cart ✓'),
+              backgroundColor: _VC.success,
+              duration: const Duration(seconds: 1),
+              behavior: SnackBarBehavior.floating,
+              shape: RoundedRectangleBorder(
+                borderRadius: BorderRadius.circular(10),
               ),
-              const SizedBox(height: 14),
-              const Text(
-                'Start New Cart?',
-                style: TextStyle(
-                  fontSize: 16,
-                  fontWeight: FontWeight.w800,
-                  color: _VC.textPrimary,
-                  fontFamily: 'Poppins',
-                ),
-              ),
-              const SizedBox(height: 8),
-              Text(
-                'Your cart has items from $currentVendorName. Adding from a new vendor will clear your cart.',
-                textAlign: TextAlign.center,
-                style: const TextStyle(
-                  fontSize: 12,
-                  color: _VC.textSecondary,
-                  fontFamily: 'Poppins',
-                  height: 1.5,
-                ),
-              ),
-              const SizedBox(height: 18),
-              Row(
-                children: [
-                  Expanded(
-                    child: OutlinedButton(
-                      onPressed: () => Navigator.pop(ctx, false),
-                      style: OutlinedButton.styleFrom(
-                        side: const BorderSide(color: _VC.border),
-                        shape: RoundedRectangleBorder(
-                          borderRadius: BorderRadius.circular(10),
-                        ),
-                        padding: const EdgeInsets.symmetric(vertical: 11),
-                      ),
-                      child: const Text(
-                        'Cancel',
-                        style: TextStyle(
-                          color: _VC.textMuted,
-                          fontFamily: 'Poppins',
-                          fontWeight: FontWeight.w600,
-                          fontSize: 13,
-                        ),
-                      ),
-                    ),
-                  ),
-                  const SizedBox(width: 10),
-                  Expanded(
-                    child: ElevatedButton(
-                      onPressed: () => Navigator.pop(ctx, true),
-                      style: ElevatedButton.styleFrom(
-                        backgroundColor: _VC.accent,
-                        elevation: 0,
-                        shape: RoundedRectangleBorder(
-                          borderRadius: BorderRadius.circular(10),
-                        ),
-                        padding: const EdgeInsets.symmetric(vertical: 11),
-                      ),
-                      child: const Text(
-                        'Clear & Add',
-                        style: TextStyle(
-                          color: Colors.white,
-                          fontFamily: 'Poppins',
-                          fontWeight: FontWeight.w700,
-                          fontSize: 13,
-                        ),
-                      ),
-                    ),
-                  ),
-                ],
-              ),
-            ],
-          ),
-        ),
-      ),
+            ),
+          );
+        }
+      },
     );
-    return result ?? false;
   }
 
   @override
@@ -346,283 +229,255 @@ class _VendorCardState extends State<VendorCard> {
   }
 
   // ════════════════════════════════════════════════════════════
-  // LIST CARD — Full width (Home, Restaurants sections)
+  // LIST CARD — Full width (Street Food, Sweets screens)
   // ════════════════════════════════════════════════════════════
   Widget _buildListCard() {
     final v = widget.vendor;
-    final isOpen = v.isActive;
-    final gradColors = _gradientColors(v.category);
+    final isOpen = v.isOpenNow;
     final hasImage = v.imageUrl != null && v.imageUrl!.isNotEmpty;
-    final tags = v.category
-        .split(',')
-        .map((c) => c.trim())
-        .where((c) => c.isNotEmpty)
-        .take(2)
-        .toList();
+    final cats = v.categories;
+    final showCats = cats.take(3).toList();
+    final extraCats = cats.length > 3 ? cats.length - 3 : 0;
 
-    return Container(
-      margin: const EdgeInsets.fromLTRB(14, 0, 14, 12),
-      decoration: BoxDecoration(
-        color: _VC.surface,
-        borderRadius: BorderRadius.circular(16),
-        border: Border.all(color: _VC.border),
-        boxShadow: const [
-          BoxShadow(color: _VC.shadow, blurRadius: 8, offset: Offset(0, 3)),
-        ],
-      ),
-      child: Column(
-        children: [
-          // ── TOP SECTION ─────────────────────────────────────
-          GestureDetector(
-            onTap: isOpen ? widget.onTap : null,
-            child: Padding(
-              padding: const EdgeInsets.all(12),
-              child: Row(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  // LEFT — Vendor image (40%)
-                  Stack(
-                    children: [
-                      ClipRRect(
-                        borderRadius: BorderRadius.circular(12),
-                        child: hasImage
-                            ? CachedNetworkImage(
-                                imageUrl: v.imageUrl!,
-                                width: 100,
-                                height: 100,
-                                fit: BoxFit.cover,
-                                color: !v.isCurrentShiftActive
-                                    ? Colors.black38
-                                    : null,
-                                colorBlendMode: BlendMode.darken,
-                                placeholder: (_, __) => _imagePlaceholder(
-                                  gradColors,
-                                  v.category,
-                                  100,
-                                ),
-                                errorWidget: (_, __, ___) => _imagePlaceholder(
-                                  gradColors,
-                                  v.category,
-                                  100,
-                                ),
-                              )
-                            : _imagePlaceholder(gradColors, v.category, 100),
+    return InkWell(
+      onTap: widget.onTap,
+      borderRadius: BorderRadius.circular(12),
+      child: Container(
+        margin: const EdgeInsets.symmetric(horizontal: 16, vertical: 6),
+        padding: const EdgeInsets.all(12),
+        decoration: BoxDecoration(
+          color: Colors.white,
+          borderRadius: BorderRadius.circular(12),
+          boxShadow: [
+            BoxShadow(
+              color: Colors.black.withValues(alpha: 0.04),
+              blurRadius: 20,
+              offset: const Offset(0, 4),
+            ),
+          ],
+        ),
+        child: Row(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            // ── LEFT: Vendor image ────────────────────
+            ClipRRect(
+              borderRadius: BorderRadius.circular(12),
+              child: hasImage
+                  ? CachedNetworkImage(
+                      imageUrl: v.imageUrl!,
+                      width: 90,
+                      height: 90,
+                      fit: BoxFit.cover,
+                      placeholder: (_, __) => Container(
+                        width: 90,
+                        height: 90,
+                        color: const Color(0xFFE8EFF1),
                       ),
-                      if (!v.isCurrentShiftActive)
-                        Positioned(
-                          bottom: 4,
-                          left: 0,
-                          right: 0,
-                          child: Center(
-                            child: Container(
+                      errorWidget: (_, __, ___) => Container(
+                        width: 90,
+                        height: 90,
+                        color: const Color(0xFFE8EFF1),
+                      ),
+                    )
+                  : Container(
+                      width: 90,
+                      height: 90,
+                      color: const Color(0xFFE8EFF1),
+                    ),
+            ),
+            const SizedBox(width: 12),
+
+            // ── RIGHT: Info column ────────────────────
+            Expanded(
+              child: SizedBox(
+                height: 90,
+                child: Column(
+                  mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    // SECTION 1 — Name + Status Badge
+                    Row(
+                      mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                      children: [
+                        Expanded(
+                          child: Text(
+                            v.name,
+                            style: const TextStyle(
+                              fontWeight: FontWeight.w700,
+                              fontSize: 15,
+                              color: Color(0xFF161D1F),
+                            ),
+                            maxLines: 1,
+                            overflow: TextOverflow.ellipsis,
+                          ),
+                        ),
+                        const SizedBox(width: 8),
+                        Container(
+                          padding: const EdgeInsets.symmetric(
+                            horizontal: 8,
+                            vertical: 3,
+                          ),
+                          decoration: BoxDecoration(
+                            color: isOpen
+                                ? const Color(0xFF16A34A)
+                                : const Color(0xFFDC2626),
+                            borderRadius: BorderRadius.circular(20),
+                          ),
+                          child: Text(
+                            isOpen ? 'Open' : 'Closed',
+                            style: const TextStyle(
+                              color: Colors.white,
+                              fontSize: 10,
+                              fontWeight: FontWeight.w700,
+                            ),
+                          ),
+                        ),
+                      ],
+                    ),
+
+                    // SECTION 2 — Category Chips
+                    if (showCats.isNotEmpty)
+                      Wrap(
+                        spacing: 4,
+                        children: [
+                          ...showCats.map(
+                            (cat) => Container(
                               padding: const EdgeInsets.symmetric(
-                                horizontal: 6,
+                                horizontal: 8,
                                 vertical: 2,
                               ),
                               decoration: BoxDecoration(
-                                color: Colors.black.withOpacity(0.65),
-                                borderRadius: BorderRadius.circular(6),
-                              ),
-                              child: const Text(
-                                'Closed Now',
-                                style: TextStyle(
-                                  color: Colors.white,
-                                  fontSize: 8,
-                                  fontWeight: FontWeight.w700,
-                                  fontFamily: 'Poppins',
+                                border: Border.all(
+                                  color: const Color(0xFFFF6B35),
+                                  width: 1,
                                 ),
+                                borderRadius: BorderRadius.circular(20),
                               ),
-                            ),
-                          ),
-                        ),
-                    ],
-                  ),
-                  const SizedBox(width: 12),
-
-                  // RIGHT — Vendor details (60%)
-                  Expanded(
-                    child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                        // Name + Open badge
-                        Row(
-                          crossAxisAlignment: CrossAxisAlignment.start,
-                          children: [
-                            Expanded(
                               child: Text(
-                                v.name,
+                                cat,
                                 style: const TextStyle(
-                                  fontSize: 15,
-                                  fontWeight: FontWeight.w800,
-                                  color: _VC.textPrimary,
-                                  fontFamily: 'Poppins',
-                                  height: 1.2,
+                                  color: Color(0xFFFF6B35),
+                                  fontSize: 10,
+                                  fontWeight: FontWeight.w700,
                                 ),
-                                maxLines: 2,
-                                overflow: TextOverflow.ellipsis,
                               ),
                             ),
-                            const SizedBox(width: 6),
-                            _openBadge(isOpen),
-                          ],
-                        ),
-                        const SizedBox(height: 5),
-
-                        // Cuisine tags (orange pills)
-                        if (tags.isNotEmpty)
-                          Wrap(
-                            spacing: 5,
-                            runSpacing: 4,
-                            children: tags
-                                .map(
-                                  (t) => Container(
-                                    padding: const EdgeInsets.symmetric(
-                                      horizontal: 7,
-                                      vertical: 2,
-                                    ),
-                                    decoration: BoxDecoration(
-                                      color: _VC.accentLight,
-                                      borderRadius: BorderRadius.circular(6),
-                                      border: Border.all(
-                                        color: _VC.accentBorder,
-                                      ),
-                                    ),
-                                    child: Text(
-                                      t,
-                                      style: const TextStyle(
-                                        color: _VC.accent,
-                                        fontSize: 9,
-                                        fontWeight: FontWeight.w700,
-                                        fontFamily: 'Poppins',
-                                      ),
-                                    ),
-                                  ),
-                                )
-                                .toList(),
                           ),
+                          if (extraCats > 0)
+                            Container(
+                              padding: const EdgeInsets.symmetric(
+                                horizontal: 8,
+                                vertical: 2,
+                              ),
+                              decoration: BoxDecoration(
+                                border: Border.all(
+                                  color: const Color(0xFFFF6B35),
+                                  width: 1,
+                                ),
+                                borderRadius: BorderRadius.circular(20),
+                              ),
+                              child: Text(
+                                '+$extraCats more',
+                                style: const TextStyle(
+                                  color: Color(0xFFFF6B35),
+                                  fontSize: 10,
+                                  fontWeight: FontWeight.w700,
+                                ),
+                              ),
+                            ),
+                        ],
+                      ),
 
-                        const SizedBox(height: 6),
-
-                        // Rating + Distance + ETA row
+                    // SECTION 3 — Metrics Row + optional Opens In
+                    Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
                         Row(
                           children: [
-                            if (v.rating != null) ...[
-                              const Icon(
-                                Icons.star_rounded,
-                                color: _VC.gold,
-                                size: 13,
+                            // Rating
+                            const Icon(
+                              Icons.star_rounded,
+                              color: Color(0xFFFFD700),
+                              size: 14,
+                            ),
+                            const SizedBox(width: 2),
+                            Text(
+                              v.rating != null ? v.rating!.toStringAsFixed(1) : 'Not rated yet',
+                              style: const TextStyle(
+                                fontSize: 11,
+                                color: Color(0xFF6B7280),
+                                fontWeight: FontWeight.w600,
                               ),
-                              const SizedBox(width: 2),
-                              Text(
-                                v.rating!.toStringAsFixed(1),
-                                style: const TextStyle(
-                                  fontSize: 11,
-                                  fontWeight: FontWeight.w700,
-                                  color: _VC.textSecondary,
-                                  fontFamily: 'Poppins',
-                                ),
+                            ),
+                            const SizedBox(width: 12),
+                            // Delivery Time
+                            const Icon(
+                              Icons.schedule_rounded,
+                              color: Color(0xFF6B7280),
+                              size: 14,
+                            ),
+                            const SizedBox(width: 2),
+                            Text(
+                              v.deliveryTime,
+                              style: const TextStyle(
+                                fontSize: 11,
+                                color: Color(0xFF6B7280),
+                                fontWeight: FontWeight.w600,
                               ),
-                              const SizedBox(width: 6),
-                              Container(
-                                width: 3,
-                                height: 3,
-                                decoration: const BoxDecoration(
-                                  color: _VC.border,
-                                  shape: BoxShape.circle,
-                                ),
-                              ),
-                              const SizedBox(width: 6),
-                            ],
+                            ),
+                            // Distance
                             if (v.distanceKm != null) ...[
+                              const SizedBox(width: 12),
                               const Icon(
                                 Icons.location_on_rounded,
-                                size: 11,
-                                color: _VC.accent,
+                                color: Color(0xFF6B7280),
+                                size: 14,
                               ),
                               const SizedBox(width: 2),
                               Text(
                                 '${v.distanceKm!.toStringAsFixed(1)} km',
                                 style: const TextStyle(
                                   fontSize: 11,
-                                  color: _VC.textMuted,
-                                  fontFamily: 'Poppins',
-                                ),
-                              ),
-                            ],
-                            const SizedBox(width: 6),
-                            const Icon(
-                              Icons.access_time_rounded,
-                              size: 11,
-                              color: _VC.textMuted,
-                            ),
-                            const SizedBox(width: 2),
-                            Text(
-                              EtaHelper.getEta(distanceKm: v.distanceKm),
-                              style: const TextStyle(
-                                fontSize: 11,
-                                color: _VC.textMuted,
-                                fontFamily: 'Poppins',
-                              ),
-                            ),
-                          ],
-                        ),
-
-                        const SizedBox(height: 5),
-
-                        // Shift badge
-                        _shiftBadge(v),
-
-                        // Delivery + Min order
-                        Row(
-                          children: [
-                            const Text('🛵', style: TextStyle(fontSize: 11)),
-                            const SizedBox(width: 4),
-                            Text(
-                              _deliveryText(),
-                              style: const TextStyle(
-                                fontSize: 10,
-                                color: _VC.textMuted,
-                                fontFamily: 'Poppins',
-                              ),
-                            ),
-                            if (v.minimumOrder != null &&
-                                v.minimumOrder! > 0) ...[
-                              const SizedBox(width: 8),
-                              Container(
-                                padding: const EdgeInsets.symmetric(
-                                  horizontal: 6,
-                                  vertical: 1,
-                                ),
-                                decoration: BoxDecoration(
-                                  color: _VC.border.withOpacity(0.5),
-                                  borderRadius: BorderRadius.circular(5),
-                                ),
-                                child: Text(
-                                  'Min ₹${v.minimumOrder!.toInt()}',
-                                  style: const TextStyle(
-                                    fontSize: 9,
-                                    color: _VC.textMuted,
-                                    fontFamily: 'Poppins',
-                                  ),
+                                  color: Color(0xFF6B7280),
+                                  fontWeight: FontWeight.w600,
                                 ),
                               ),
                             ],
                           ],
                         ),
+                        // SECTION 4 — Opens In (conditional)
+                        if (!isOpen &&
+                            v.opensInMinutes != null &&
+                            v.opensInMinutes! > 0) ...[
+                          const SizedBox(height: 4),
+                          Row(
+                            children: [
+                              const Icon(
+                                Icons.timer_rounded,
+                                color: Color(0xFFFF6B35),
+                                size: 14,
+                              ),
+                              const SizedBox(width: 4),
+                              Text(
+                                'Opens in ${v.opensInMinutes} min',
+                                style: const TextStyle(
+                                  fontSize: 11,
+                                  color: Color(0xFFFF6B35),
+                                  fontWeight: FontWeight.w600,
+                                ),
+                              ),
+                            ],
+                          ),
+                        ],
                       ],
                     ),
-                  ),
-                ],
+                  ],
+                ),
               ),
             ),
-          ),
-
-          // ── DIVIDER ──────────────────────────────────────────
-          Container(height: 1, color: _VC.border),
-
-          // ── BOTTOM SECTION — Menu items horizontal scroll ────
-          _buildMenuItemsRow(isOpen),
-        ],
+          ],
+        ),
       ),
     );
   }
@@ -632,7 +487,7 @@ class _VendorCardState extends State<VendorCard> {
   // ════════════════════════════════════════════════════════════
   Widget _buildGridCard() {
     final v = widget.vendor;
-    final isOpen = v.isActive;
+    final isOpen = v.isOpenNow;
     final gradColors = _gradientColors(v.category);
     final hasImage = v.imageUrl != null && v.imageUrl!.isNotEmpty;
     final tags = v.category
@@ -738,24 +593,22 @@ class _VendorCardState extends State<VendorCard> {
                         // Rating + distance
                         Row(
                           children: [
-                            if (v.rating != null) ...[
-                              const Icon(
-                                Icons.star_rounded,
-                                color: _VC.gold,
-                                size: 11,
+                            const Icon(
+                              Icons.star_rounded,
+                              color: _VC.gold,
+                              size: 11,
+                            ),
+                            const SizedBox(width: 2),
+                            Text(
+                              v.rating != null ? v.rating!.toStringAsFixed(1) : '-',
+                              style: const TextStyle(
+                                fontSize: 10,
+                                fontWeight: FontWeight.w700,
+                                color: _VC.textSecondary,
+                                fontFamily: 'Poppins',
                               ),
-                              const SizedBox(width: 2),
-                              Text(
-                                v.rating!.toStringAsFixed(1),
-                                style: const TextStyle(
-                                  fontSize: 10,
-                                  fontWeight: FontWeight.w700,
-                                  color: _VC.textSecondary,
-                                  fontFamily: 'Poppins',
-                                ),
-                              ),
-                              const SizedBox(width: 4),
-                            ],
+                            ),
+                            const SizedBox(width: 4),
                             if (v.distanceKm != null) ...[
                               const Icon(
                                 Icons.location_on_rounded,
@@ -796,11 +649,10 @@ class _VendorCardState extends State<VendorCard> {
   // BOTTOM SECTION — Menu items horizontal scroll (shared)
   // ════════════════════════════════════════════════════════════
   Widget _buildMenuItemsRow(bool isOpen) {
-    final isShiftActive = widget.vendor.isCurrentShiftActive;
     // Loading state
     if (_loadingItems) {
       return SizedBox(
-        height: 152,
+        height: 168,
         child: ListView.builder(
           scrollDirection: Axis.horizontal,
           padding: const EdgeInsets.fromLTRB(10, 6, 10, 8),
@@ -843,7 +695,7 @@ class _VendorCardState extends State<VendorCard> {
     final totalCount = items.length;
 
     return SizedBox(
-      height: 152,
+      height: 168,
       child: ListView.builder(
         scrollDirection: Axis.horizontal,
         physics: const ClampingScrollPhysics(),
@@ -909,21 +761,52 @@ class _VendorCardState extends State<VendorCard> {
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
+                  // NEW:
                   // Food image
-                  ClipRRect(
-                    borderRadius: const BorderRadius.vertical(
-                      top: Radius.circular(9),
-                    ),
-                    child: hasImg
-                        ? CachedNetworkImage(
-                            imageUrl: item.imageUrl!,
-                            width: 100,
-                            height: 96,
-                            fit: BoxFit.cover,
-                            errorWidget: (_, __, ___) =>
-                                _miniItemPlaceholder(item.category),
-                          )
-                        : _miniItemPlaceholder(item.category),
+                  Stack(
+                    children: [
+                      ClipRRect(
+                        borderRadius: const BorderRadius.vertical(
+                          top: Radius.circular(9),
+                        ),
+                        child: hasImg
+                            ? CachedNetworkImage(
+                                imageUrl: item.imageUrl!,
+                                width: 100,
+                                height: 96,
+                                fit: BoxFit.cover,
+                                errorWidget: (_, __, ___) =>
+                                    _miniItemPlaceholder(item.category),
+                              )
+                            : _miniItemPlaceholder(item.category),
+                      ),
+                      if (item.isDiscounted &&
+                          item.originalPrice != null &&
+                          item.originalPrice! > item.appPrice)
+                        Positioned(
+                          top: 4,
+                          left: 4,
+                          child: Container(
+                            padding: const EdgeInsets.symmetric(
+                              horizontal: 5,
+                              vertical: 2,
+                            ),
+                            decoration: BoxDecoration(
+                              color: _VC.success,
+                              borderRadius: BorderRadius.circular(5),
+                            ),
+                            child: Text(
+                              '₹${(item.originalPrice! - item.appPrice).toStringAsFixed(0)} OFF',
+                              style: const TextStyle(
+                                color: Colors.white,
+                                fontSize: 8,
+                                fontWeight: FontWeight.w800,
+                                fontFamily: 'Poppins',
+                              ),
+                            ),
+                          ),
+                        ),
+                    ],
                   ),
                   // Name + Price + Add button
                   Padding(
@@ -943,31 +826,46 @@ class _VendorCardState extends State<VendorCard> {
                           ),
                         ),
                         const SizedBox(height: 3),
+                        // NEW:
                         Row(
                           children: [
                             Expanded(
-                              child: Text(
-                                '₹${item.appPrice.toStringAsFixed(0)}',
-                                style: const TextStyle(
-                                  fontSize: 11,
-                                  fontWeight: FontWeight.w800,
-                                  color: _VC.accent,
-                                  fontFamily: 'Poppins',
-                                ),
+                              child: Column(
+                                crossAxisAlignment: CrossAxisAlignment.start,
+                                mainAxisSize: MainAxisSize.min,
+                                children: [
+                                  if (item.isDiscounted &&
+                                      item.originalPrice != null &&
+                                      item.originalPrice! > item.appPrice)
+                                    Text(
+                                      '₹${item.originalPrice!.toStringAsFixed(0)}',
+                                      style: const TextStyle(
+                                        fontSize: 9,
+                                        color: _VC.textMuted,
+                                        fontFamily: 'SpaceMono',
+                                        decoration: TextDecoration.lineThrough,
+                                      ),
+                                    ),
+                                  Text(
+                                    '₹${item.appPrice.toStringAsFixed(0)}',
+                                    style: const TextStyle(
+                                      fontSize: 11,
+                                      fontWeight: FontWeight.w800,
+                                      color: _VC.accent,
+                                      fontFamily: 'SpaceMono',
+                                    ),
+                                  ),
+                                ],
                               ),
                             ),
                             // Add+ button — direct cart add
                             GestureDetector(
-                              onTap: (isOpen && isShiftActive)
-                                  ? () => _addToCart(item)
-                                  : null,
+                              onTap: isOpen ? () => _addToCart(item) : null,
                               child: Container(
                                 width: 20,
                                 height: 20,
                                 decoration: BoxDecoration(
-                                  color: (isOpen && isShiftActive)
-                                      ? _VC.accent
-                                      : _VC.border,
+                                  color: isOpen ? _VC.accent : _VC.border,
                                   borderRadius: BorderRadius.circular(5),
                                 ),
                                 child: Center(
@@ -1045,9 +943,14 @@ class _VendorCardState extends State<VendorCard> {
     );
   }
 
-  Widget _imagePlaceholder(List<Color> colors, String category, double size) {
+  Widget _imagePlaceholder(
+    List<Color> colors,
+    String category,
+    double size, {
+    bool full = false,
+  }) {
     return Container(
-      width: size,
+      width: full ? double.infinity : size,
       height: size,
       decoration: BoxDecoration(
         gradient: LinearGradient(
@@ -1062,32 +965,17 @@ class _VendorCardState extends State<VendorCard> {
     );
   }
 
-  Widget _shiftBadge(VendorModel v) {
-    if (v.morningShiftActive && v.eveningShiftActive) {
-      return const SizedBox.shrink(); // dono active — koi badge nahi
-    }
-    if (!v.morningShiftActive && !v.eveningShiftActive) {
-      return const SizedBox.shrink();
-    }
-    final isMorningOnly = v.morningShiftActive && !v.eveningShiftActive;
-
-    // ✅ FIX: Hardcoded text hata ke VendorModel ke dynamic hours use karo
-    // VendorModel.morningStartHour/EndHour DB se set hote hain via _syncVendorModelShiftTimes()
-    final morningLabel =
-        '${VendorModel.morningStartHour}AM–${VendorModel.morningEndHour > 12 ? VendorModel.morningEndHour - 12 : VendorModel.morningEndHour}PM';
-    final eveningLabel =
-        '${VendorModel.eveningStartHour > 12 ? VendorModel.eveningStartHour - 12 : VendorModel.eveningStartHour}PM–${VendorModel.eveningEndHour > 12 ? VendorModel.eveningEndHour - 12 : VendorModel.eveningEndHour}PM';
-
+  Widget _timingBadge(VendorModel v) {
+    if (!v.hasOwnTiming) return const SizedBox.shrink();
+    final closed = !v.isWithinOwnHours;
     return Container(
       margin: const EdgeInsets.only(top: 4),
       padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
       decoration: BoxDecoration(
-        color: isMorningOnly
-            ? const Color(0xFFFFFBEB)
-            : const Color(0xFFFFF1EB),
+        color: closed ? const Color(0xFFFFFBEB) : const Color(0xFFFFF1EB),
         borderRadius: BorderRadius.circular(6),
         border: Border.all(
-          color: isMorningOnly
+          color: closed
               ? const Color(0xFFF59E0B).withOpacity(0.5)
               : _VC.accentBorder,
         ),
@@ -1095,18 +983,15 @@ class _VendorCardState extends State<VendorCard> {
       child: Row(
         mainAxisSize: MainAxisSize.min,
         children: [
-          Text(
-            isMorningOnly ? '🌅' : '🌆',
-            style: const TextStyle(fontSize: 9),
-          ),
+          Text(closed ? '⏰' : '🕐', style: const TextStyle(fontSize: 9)),
           const SizedBox(width: 3),
           Text(
-            isMorningOnly ? '$morningLabel only' : '$eveningLabel only',
+            closed ? (v.opensInLabel ?? 'Closed') : v.timingRangeLabel ?? '',
             style: TextStyle(
               fontSize: 8,
               fontWeight: FontWeight.w700,
               fontFamily: 'Poppins',
-              color: isMorningOnly ? const Color(0xFFB45309) : _VC.accent,
+              color: closed ? const Color(0xFFB45309) : _VC.accent,
             ),
           ),
         ],

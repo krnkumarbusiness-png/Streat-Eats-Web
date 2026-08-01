@@ -13,6 +13,7 @@ import '../constants/colors.dart';
 import '../models/menu_item_model.dart';
 import '../models/vendor_model.dart';
 import '../providers/cart_provider.dart';
+import '../utils/cart_utils.dart';
 import '../services/menu_service.dart';
 import 'cart_screen.dart';
 import '../constants/app_snackbar.dart';
@@ -349,6 +350,10 @@ class _MenuItemDetailScreenState extends State<MenuItemDetailScreen> {
   }
 
   Widget _buildHalfFullPriceBox(MenuItemModel item) {
+    final cart = context.watch<CartProvider>();
+    final halfQty = cart.getQuantity(item.id, portionType: 'half');
+    final fullQty = cart.getQuantity(item.id, portionType: 'full');
+
     return Container(
       padding: const EdgeInsets.all(14),
       decoration: BoxDecoration(
@@ -380,128 +385,52 @@ class _MenuItemDetailScreenState extends State<MenuItemDetailScreen> {
             ],
           ),
           const SizedBox(height: 12),
-          Row(
-            children: [
-              Expanded(
-                child: Container(
-                  padding: const EdgeInsets.all(12),
-                  decoration: BoxDecoration(
-                    color: const Color(0xFF7C3AED).withOpacity(0.06),
-                    borderRadius: BorderRadius.circular(10),
-                    border: Border.all(
-                      color: const Color(0xFF7C3AED).withOpacity(0.2),
-                    ),
-                  ),
-                  child: Column(
-                    children: [
-                      const Text('🥘', style: TextStyle(fontSize: 24)),
-                      const SizedBox(height: 4),
-                      const Text(
-                        'Half',
-                        style: TextStyle(
-                          color: Color(0xFF7C3AED),
-                          fontSize: 13,
-                          fontWeight: FontWeight.w700,
-                          fontFamily: 'Poppins',
-                        ),
-                      ),
-                      const SizedBox(height: 2),
-                      if (item.halfIsDiscounted &&
-                          item.halfOriginalPrice != null) ...[
-                        Text(
-                          '₹${item.halfOriginalPrice!.toStringAsFixed(0)}',
-                          style: const TextStyle(
-                            color: AppColors.textMuted,
-                            fontSize: 12,
-                            fontFamily: 'Poppins',
-                            decoration: TextDecoration.lineThrough,
-                          ),
-                        ),
-                        const SizedBox(height: 2),
-                      ],
-                      Text(
-                        '₹${item.halfPrice!.toStringAsFixed(0)}',
-                        style: TextStyle(
-                          color:
-                              (item.halfIsDiscounted &&
-                                  item.halfOriginalPrice != null)
-                              ? AppColors.error
-                              : const Color(0xFF7C3AED),
-                          fontSize: 20,
-                          fontWeight: FontWeight.w900,
-                          fontFamily: 'Poppins',
-                        ),
-                      ),
-                    ],
-                  ),
-                ),
-              ),
-              const Padding(
-                padding: EdgeInsets.symmetric(horizontal: 10),
-                child: Text(
-                  'or',
-                  style: TextStyle(
-                    color: AppColors.textMuted,
-                    fontSize: 12,
-                    fontFamily: 'Poppins',
-                  ),
-                ),
-              ),
-              Expanded(
-                child: Container(
-                  padding: const EdgeInsets.all(12),
-                  decoration: BoxDecoration(
-                    color: AppColors.primary.withOpacity(0.06),
-                    borderRadius: BorderRadius.circular(10),
-                    border: Border.all(
-                      color: AppColors.primary.withOpacity(0.2),
-                    ),
-                  ),
-                  child: Column(
-                    children: [
-                      const Text('🍲', style: TextStyle(fontSize: 24)),
-                      const SizedBox(height: 4),
-                      const Text(
-                        'Full',
-                        style: TextStyle(
-                          color: AppColors.primary,
-                          fontSize: 13,
-                          fontWeight: FontWeight.w700,
-                          fontFamily: 'Poppins',
-                        ),
-                      ),
-                      const SizedBox(height: 2),
-                      if (item.fullIsDiscounted &&
-                          item.fullOriginalPrice != null) ...[
-                        Text(
-                          '₹${item.fullOriginalPrice!.toStringAsFixed(0)}',
-                          style: const TextStyle(
-                            color: AppColors.textMuted,
-                            fontSize: 12,
-                            fontFamily: 'Poppins',
-                            decoration: TextDecoration.lineThrough,
-                          ),
-                        ),
-                        const SizedBox(height: 2),
-                      ],
-                      Text(
-                        '₹${item.fullPrice!.toStringAsFixed(0)}',
-                        style: TextStyle(
-                          color:
-                              (item.fullIsDiscounted &&
-                                  item.fullOriginalPrice != null)
-                              ? AppColors.error
-                              : AppColors.primary,
-                          fontSize: 20,
-                          fontWeight: FontWeight.w900,
-                          fontFamily: 'Poppins',
-                        ),
-                      ),
-                    ],
-                  ),
-                ),
-              ),
-            ],
+          _PortionRow(
+            label: 'Half',
+            emoji: '🥘',
+            subtitle: 'Smaller portion — great for one',
+            price: item.halfPrice ?? item.appPrice,
+            qty: halfQty,
+            onAdd: () {
+              HapticFeedback.selectionClick();
+              CartUtils.handleCartAddItem(context, 
+                item,
+                widget.vendor,
+                portionType: 'half',
+                effectivePrice: item.halfPrice,
+              );
+            },
+            onRemove: () {
+              HapticFeedback.selectionClick();
+              context.read<CartProvider>().removeItem(
+                item.id,
+                portionType: 'half',
+              );
+            },
+          ),
+          const SizedBox(height: 10),
+          _PortionRow(
+            label: 'Full',
+            emoji: '🍲',
+            subtitle: 'Larger portion — for a hearty meal',
+            price: item.fullPrice ?? item.appPrice,
+            qty: fullQty,
+            onAdd: () {
+              HapticFeedback.selectionClick();
+              CartUtils.handleCartAddItem(context, 
+                item,
+                widget.vendor,
+                portionType: 'full',
+                effectivePrice: item.fullPrice,
+              );
+            },
+            onRemove: () {
+              HapticFeedback.selectionClick();
+              context.read<CartProvider>().removeItem(
+                item.id,
+                portionType: 'full',
+              );
+            },
           ),
         ],
       ),
@@ -770,153 +699,30 @@ class _MenuItemDetailScreenState extends State<MenuItemDetailScreen> {
                     ),
                     const SizedBox(width: 10),
                   ],
+                  // NEW:
                   Expanded(
                     flex: cart.isEmpty ? 1 : 6,
-                    child: qty == 0
-                        ? GestureDetector(
-                            onTap: () async {
-                              HapticFeedback.mediumImpact();
-                              if (item.hasHalfFull) {
-                                _showPortionSheet();
-                              } else {
-                                final added = context
-                                    .read<CartProvider>()
-                                    .addItem(item, widget.vendor);
-                                if (!added && context.mounted) {
-                                  _showLimitSnackBar(
-                                    context.read<CartProvider>(),
-                                  );
-                                } else {
-                                  await Future.delayed(
-                                    const Duration(milliseconds: 300),
-                                  );
-                                  if (context.mounted) {
-                                    await _triggerUpsellIfNeeded(context);
-                                  }
-                                }
-                              }
-                            },
-                            child: Container(
-                              height: 52,
-                              decoration: BoxDecoration(
-                                color: AppColors.primary,
-                                borderRadius: BorderRadius.circular(14),
-                                boxShadow: [
-                                  BoxShadow(
-                                    color: AppColors.primary.withOpacity(0.35),
-                                    blurRadius: 12,
-                                    offset: const Offset(0, 4),
+                    child: item.hasHalfFull
+                        ? (qty == 0
+                              ? Container(
+                                  height: 52,
+                                  decoration: BoxDecoration(
+                                    color: AppColors.border.withOpacity(0.5),
+                                    borderRadius: BorderRadius.circular(14),
                                   ),
-                                ],
-                              ),
-                              child: Center(
-                                child: Text(
-                                  item.hasHalfFull
-                                      ? 'Choose Portion'
-                                      : 'Add to Cart — ₹${item.appPrice.toStringAsFixed(0)}',
-                                  style: const TextStyle(
-                                    color: Colors.white,
-                                    fontWeight: FontWeight.w800,
-                                    fontSize: 14,
-                                    fontFamily: 'Poppins',
+                                  child: const Center(
+                                    child: Text(
+                                      'Select portion above ↑',
+                                      style: TextStyle(
+                                        color: AppColors.textMuted,
+                                        fontWeight: FontWeight.w700,
+                                        fontSize: 13,
+                                        fontFamily: 'Poppins',
+                                      ),
+                                    ),
                                   ),
-                                ),
-                              ),
-                            ),
-                          )
-                        : Row(
-                            children: [
-                              Container(
-                                height: 52,
-                                decoration: BoxDecoration(
-                                  color: AppColors.primary,
-                                  borderRadius: BorderRadius.circular(14),
-                                  boxShadow: [
-                                    BoxShadow(
-                                      color: AppColors.primary.withOpacity(
-                                        0.25,
-                                      ),
-                                      blurRadius: 8,
-                                      offset: const Offset(0, 3),
-                                    ),
-                                  ],
-                                ),
-                                child: Row(
-                                  mainAxisSize: MainAxisSize.min,
-                                  children: [
-                                    GestureDetector(
-                                      onTap: () {
-                                        HapticFeedback.selectionClick();
-                                        if (item.hasHalfFull) {
-                                          _showPortionSheet();
-                                        } else {
-                                          context
-                                              .read<CartProvider>()
-                                              .removeItem(item.id);
-                                        }
-                                      },
-                                      behavior: HitTestBehavior.opaque,
-                                      child: const SizedBox(
-                                        width: 44,
-                                        height: 52,
-                                        child: Center(
-                                          child: Icon(
-                                            Icons.remove_rounded,
-                                            color: Colors.white,
-                                            size: 20,
-                                          ),
-                                        ),
-                                      ),
-                                    ),
-                                    Padding(
-                                      padding: const EdgeInsets.symmetric(
-                                        horizontal: 4,
-                                      ),
-                                      child: Text(
-                                        '$qty',
-                                        style: const TextStyle(
-                                          color: Colors.white,
-                                          fontWeight: FontWeight.w800,
-                                          fontSize: 18,
-                                          fontFamily: 'Poppins',
-                                        ),
-                                      ),
-                                    ),
-                                    GestureDetector(
-                                      onTap: () {
-                                        HapticFeedback.selectionClick();
-                                        if (item.hasHalfFull) {
-                                          _showPortionSheet();
-                                        } else {
-                                          final added = context
-                                              .read<CartProvider>()
-                                              .addItem(item, widget.vendor);
-                                          if (!added && context.mounted) {
-                                            _showLimitSnackBar(
-                                              context.read<CartProvider>(),
-                                            );
-                                          }
-                                        }
-                                      },
-                                      behavior: HitTestBehavior.opaque,
-                                      child: const SizedBox(
-                                        width: 44,
-                                        height: 52,
-                                        child: Center(
-                                          child: Icon(
-                                            Icons.add_rounded,
-                                            color: Colors.white,
-                                            size: 20,
-                                          ),
-                                        ),
-                                      ),
-                                    ),
-                                  ],
-                                ),
-                              ),
-                              const SizedBox(width: 10),
-                              Expanded(
-                                child: GestureDetector(
+                                )
+                              : GestureDetector(
                                   onTap: () {
                                     HapticFeedback.lightImpact();
                                     Navigator.push(
@@ -931,6 +737,15 @@ class _MenuItemDetailScreenState extends State<MenuItemDetailScreen> {
                                     decoration: BoxDecoration(
                                       color: AppColors.primary,
                                       borderRadius: BorderRadius.circular(14),
+                                      boxShadow: [
+                                        BoxShadow(
+                                          color: AppColors.primary.withOpacity(
+                                            0.35,
+                                          ),
+                                          blurRadius: 12,
+                                          offset: const Offset(0, 4),
+                                        ),
+                                      ],
                                     ),
                                     child: const Row(
                                       mainAxisAlignment:
@@ -954,10 +769,185 @@ class _MenuItemDetailScreenState extends State<MenuItemDetailScreen> {
                                       ],
                                     ),
                                   ),
-                                ),
-                              ),
-                            ],
-                          ),
+                                ))
+                        : (qty == 0
+                              ? GestureDetector(
+                                  onTap: () async {
+                                    HapticFeedback.mediumImpact();
+                                    CartUtils.handleCartAddItem(
+                                      context,
+                                      item,
+                                      widget.vendor,
+                                      onLimitReached: () {
+                                        _showLimitSnackBar(context.read<CartProvider>());
+                                      },
+                                      onSuccess: () async {
+
+                                      await Future.delayed(
+                                        const Duration(milliseconds: 300),
+                                      );
+                                      if (context.mounted) {
+                                        await _triggerUpsellIfNeeded(context);
+                                        }
+                                      },
+                                    );
+                                  },
+                                  child: Container(
+                                    height: 52,
+                                    decoration: BoxDecoration(
+                                      color: AppColors.primary,
+                                      borderRadius: BorderRadius.circular(14),
+                                      boxShadow: [
+                                        BoxShadow(
+                                          color: AppColors.primary.withOpacity(
+                                            0.35,
+                                          ),
+                                          blurRadius: 12,
+                                          offset: const Offset(0, 4),
+                                        ),
+                                      ],
+                                    ),
+                                    child: Center(
+                                      child: Text(
+                                        'Add to Cart — ₹${item.appPrice.toStringAsFixed(0)}',
+                                        style: const TextStyle(
+                                          color: Colors.white,
+                                          fontWeight: FontWeight.w800,
+                                          fontSize: 14,
+                                          fontFamily: 'Poppins',
+                                        ),
+                                      ),
+                                    ),
+                                  ),
+                                )
+                              : Row(
+                                  children: [
+                                    Container(
+                                      height: 52,
+                                      decoration: BoxDecoration(
+                                        color: AppColors.primary,
+                                        borderRadius: BorderRadius.circular(14),
+                                        boxShadow: [
+                                          BoxShadow(
+                                            color: AppColors.primary
+                                                .withOpacity(0.25),
+                                            blurRadius: 8,
+                                            offset: const Offset(0, 3),
+                                          ),
+                                        ],
+                                      ),
+                                      child: Row(
+                                        mainAxisSize: MainAxisSize.min,
+                                        children: [
+                                          GestureDetector(
+                                            onTap: () {
+                                              HapticFeedback.selectionClick();
+                                              context
+                                                  .read<CartProvider>()
+                                                  .removeItem(item.id);
+                                            },
+                                            behavior: HitTestBehavior.opaque,
+                                            child: const SizedBox(
+                                              width: 44,
+                                              height: 52,
+                                              child: Center(
+                                                child: Icon(
+                                                  Icons.remove_rounded,
+                                                  color: Colors.white,
+                                                  size: 20,
+                                                ),
+                                              ),
+                                            ),
+                                          ),
+                                          Padding(
+                                            padding: const EdgeInsets.symmetric(
+                                              horizontal: 4,
+                                            ),
+                                            child: Text(
+                                              '$qty',
+                                              style: const TextStyle(
+                                                color: Colors.white,
+                                                fontWeight: FontWeight.w800,
+                                                fontSize: 18,
+                                                fontFamily: 'Poppins',
+                                              ),
+                                            ),
+                                          ),
+                                          GestureDetector(
+                                            onTap: () {
+                                              HapticFeedback.selectionClick();
+                                              CartUtils.handleCartAddItem(
+                                                context,
+                                                item,
+                                                widget.vendor,
+                                                onLimitReached: () {
+                                                  _showLimitSnackBar(context.read<CartProvider>());
+                                                },
+                                              );
+                                            },
+                                            behavior: HitTestBehavior.opaque,
+                                            child: const SizedBox(
+                                              width: 44,
+                                              height: 52,
+                                              child: Center(
+                                                child: Icon(
+                                                  Icons.add_rounded,
+                                                  color: Colors.white,
+                                                  size: 20,
+                                                ),
+                                              ),
+                                            ),
+                                          ),
+                                        ],
+                                      ),
+                                    ),
+                                    const SizedBox(width: 10),
+                                    Expanded(
+                                      child: GestureDetector(
+                                        onTap: () {
+                                          HapticFeedback.lightImpact();
+                                          Navigator.push(
+                                            context,
+                                            MaterialPageRoute(
+                                              builder: (_) =>
+                                                  const CartScreen(),
+                                            ),
+                                          );
+                                        },
+                                        child: Container(
+                                          height: 52,
+                                          decoration: BoxDecoration(
+                                            color: AppColors.primary,
+                                            borderRadius: BorderRadius.circular(
+                                              14,
+                                            ),
+                                          ),
+                                          child: const Row(
+                                            mainAxisAlignment:
+                                                MainAxisAlignment.center,
+                                            children: [
+                                              Text(
+                                                'View Cart',
+                                                style: TextStyle(
+                                                  color: Colors.white,
+                                                  fontWeight: FontWeight.w800,
+                                                  fontSize: 14,
+                                                  fontFamily: 'Poppins',
+                                                ),
+                                              ),
+                                              SizedBox(width: 6),
+                                              Icon(
+                                                Icons.arrow_forward_rounded,
+                                                color: Colors.white,
+                                                size: 16,
+                                              ),
+                                            ],
+                                          ),
+                                        ),
+                                      ),
+                                    ),
+                                  ],
+                                )),
                   ),
                 ],
               ),
@@ -1326,7 +1316,7 @@ class _PortionBottomSheet extends StatelessWidget {
             qty: halfQty,
             onAdd: () {
               HapticFeedback.selectionClick();
-              context.read<CartProvider>().addItem(
+              CartUtils.handleCartAddItem(context, 
                 item,
                 vendor,
                 portionType: 'half',
@@ -1350,7 +1340,7 @@ class _PortionBottomSheet extends StatelessWidget {
             qty: fullQty,
             onAdd: () {
               HapticFeedback.selectionClick();
-              context.read<CartProvider>().addItem(
+              CartUtils.handleCartAddItem(context, 
                 item,
                 vendor,
                 portionType: 'full',
@@ -1494,9 +1484,8 @@ class _PortionRow extends StatelessWidget {
                     height: 32,
                     padding: const EdgeInsets.symmetric(horizontal: 16),
                     decoration: BoxDecoration(
-                      color: AppColors.surface,
+                      color: const Color(0xFF16A34A),
                       borderRadius: BorderRadius.circular(8),
-                      border: Border.all(color: AppColors.primary, width: 1.5),
                       boxShadow: [
                         BoxShadow(
                           color: Colors.black.withOpacity(0.08),
@@ -1511,7 +1500,7 @@ class _PortionRow extends StatelessWidget {
                         Text(
                           'ADD',
                           style: TextStyle(
-                            color: AppColors.primary,
+                            color: Colors.white,
                             fontWeight: FontWeight.w800,
                             fontSize: 12,
                             fontFamily: 'Poppins',
@@ -1520,7 +1509,7 @@ class _PortionRow extends StatelessWidget {
                         SizedBox(width: 3),
                         Icon(
                           Icons.add_rounded,
-                          color: AppColors.primary,
+                          color: Colors.white,
                           size: 14,
                         ),
                       ],
@@ -1530,7 +1519,7 @@ class _PortionRow extends StatelessWidget {
               : Container(
                   height: 32,
                   decoration: BoxDecoration(
-                    color: AppColors.primary,
+                    color: const Color(0xFF16A34A),
                     borderRadius: BorderRadius.circular(8),
                   ),
                   child: Row(
@@ -1682,7 +1671,7 @@ class _OtherItemCard extends StatelessWidget {
                         GestureDetector(
                           onTap: () {
                             HapticFeedback.lightImpact();
-                            context.read<CartProvider>().addItem(item, vendor);
+                            CartUtils.handleCartAddItem(context, item, vendor);
                           },
                           child: Container(
                             padding: const EdgeInsets.symmetric(
@@ -1969,7 +1958,7 @@ class _UpsellPopupCard extends StatelessWidget {
                         ? GestureDetector(
                             onTap: () {
                               HapticFeedback.selectionClick();
-                              context.read<CartProvider>().addItem(
+                              CartUtils.handleCartAddItem(context, 
                                 item,
                                 vendor,
                               );
@@ -1980,7 +1969,7 @@ class _UpsellPopupCard extends StatelessWidget {
                                 vertical: 4,
                               ),
                               decoration: BoxDecoration(
-                                color: AppColors.primary,
+                                color: const Color(0xFF16A34A),
                                 borderRadius: BorderRadius.circular(8),
                               ),
                               child: const Text(
@@ -1997,7 +1986,7 @@ class _UpsellPopupCard extends StatelessWidget {
                         : Container(
                             height: 28,
                             decoration: BoxDecoration(
-                              color: AppColors.primary,
+                              color: const Color(0xFF16A34A),
                               borderRadius: BorderRadius.circular(8),
                             ),
                             child: Row(
@@ -2039,7 +2028,7 @@ class _UpsellPopupCard extends StatelessWidget {
                                 GestureDetector(
                                   onTap: () {
                                     HapticFeedback.selectionClick();
-                                    context.read<CartProvider>().addItem(
+                                    CartUtils.handleCartAddItem(context, 
                                       item,
                                       vendor,
                                     );

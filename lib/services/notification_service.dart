@@ -1,13 +1,17 @@
 import 'package:firebase_messaging/firebase_messaging.dart';
+import 'package:flutter/foundation.dart' show kIsWeb;
 import 'package:flutter/material.dart';
 import 'package:flutter_local_notifications/flutter_local_notifications.dart';
-import 'package:shared_preferences/shared_preferences.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 import '../models/notification_model.dart';
 
 // ── Background Handler ────────────────────────────────────────
+// On web this is handled by firebase-messaging-sw.js (not this function).
 @pragma('vm:entry-point')
 Future<void> firebaseMessagingBackgroundHandler(RemoteMessage message) async {
+  // Web does not support this background handler path.
+  if (kIsWeb) return;
+
   final localNotif = FlutterLocalNotificationsPlugin();
 
   const androidSettings = AndroidInitializationSettings('@mipmap/ic_launcher');
@@ -16,12 +20,11 @@ Future<void> firebaseMessagingBackgroundHandler(RemoteMessage message) async {
   );
 
   const channel = AndroidNotificationChannel(
-    'street_eats_rider_orders',
-    'Rider New Orders',
-    description: 'New order alerts for Streat Eats riders',
+    'street_eats_high',
+    'Streat Eats Notifications',
+    description: 'Order updates and offers from Streat Eats',
     importance: Importance.max,
     playSound: true,
-    sound: RawResourceAndroidNotificationSound('new_order'), // ← ADD
     enableVibration: true,
     showBadge: true,
     enableLights: true,
@@ -32,9 +35,6 @@ Future<void> firebaseMessagingBackgroundHandler(RemoteMessage message) async {
         AndroidFlutterLocalNotificationsPlugin
       >();
   await androidPlugin?.createNotificationChannel(channel);
-
-  final notifType = message.data['type'] ?? '';
-  final isRiderOrder = notifType == 'new_order_available';
 
   final notifTitle =
       message.data['title'] ?? message.notification?.title ?? 'Streat Eats';
@@ -48,17 +48,13 @@ Future<void> firebaseMessagingBackgroundHandler(RemoteMessage message) async {
     notifBody,
     NotificationDetails(
       android: AndroidNotificationDetails(
-        isRiderOrder ? 'street_eats_rider_orders' : 'street_eats_high',
-        isRiderOrder ? 'Rider New Orders' : 'Streat Eats Notifications',
-        channelDescription: isRiderOrder
-            ? 'New order alerts for Streat Eats riders'
-            : 'Order updates and offers from Streat Eats',
+        'street_eats_high',
+        'Streat Eats Notifications',
+        channelDescription: 'Order updates and offers from Streat Eats',
         importance: Importance.max,
         priority: Priority.high,
         playSound: true,
-        sound: RawResourceAndroidNotificationSound('new_order'), // ← YEH
         enableVibration: true,
-        fullScreenIntent: true,
         visibility: NotificationVisibility.public,
         icon: '@mipmap/ic_launcher',
         largeIcon: const DrawableResourceAndroidBitmap('@mipmap/ic_launcher'),
@@ -72,8 +68,6 @@ class NotificationService {
   final _supabase = Supabase.instance.client;
   final _fcm = FirebaseMessaging.instance;
   final _localNotif = FlutterLocalNotificationsPlugin();
-
-  static VoidCallback? onNewOrderForRider;
 
   // ── Singleton ─────────────────────────────────────────────
   static final NotificationService _instance = NotificationService._internal();
@@ -96,43 +90,32 @@ class NotificationService {
     );
     if (settings.authorizationStatus == AuthorizationStatus.denied) return;
 
-    // Channels create karo
-    const channel = AndroidNotificationChannel(
-      'street_eats_high',
-      'Streat Eats Notifications',
-      description: 'Order updates and offers from Streat Eats',
-      importance: Importance.max,
-      playSound: true,
-      enableVibration: true,
-      showBadge: true,
-      enableLights: true,
-    );
+    // Android-only: notification channels and local notifications setup
+    if (!kIsWeb) {
+      const channel = AndroidNotificationChannel(
+        'street_eats_high',
+        'Streat Eats Notifications',
+        description: 'Order updates and offers from Streat Eats',
+        importance: Importance.max,
+        playSound: true,
+        enableVibration: true,
+        showBadge: true,
+        enableLights: true,
+      );
 
-    const riderChannel = AndroidNotificationChannel(
-      'street_eats_rider_orders',
-      'Rider New Orders',
-      description: 'New order alerts for Streat Eats riders',
-      importance: Importance.max,
-      playSound: true,
-      sound: RawResourceAndroidNotificationSound('new_order'), // ← ADD
-      enableVibration: true,
-      showBadge: true,
-      enableLights: true,
-    );
+      final androidPlugin = _localNotif
+          .resolvePlatformSpecificImplementation<
+            AndroidFlutterLocalNotificationsPlugin
+          >();
+      await androidPlugin?.createNotificationChannel(channel);
 
-    final androidPlugin = _localNotif
-        .resolvePlatformSpecificImplementation<
-          AndroidFlutterLocalNotificationsPlugin
-        >();
-    await androidPlugin?.createNotificationChannel(channel);
-    await androidPlugin?.createNotificationChannel(riderChannel);
-
-    const androidSettings = AndroidInitializationSettings(
-      '@mipmap/ic_launcher',
-    );
-    await _localNotif.initialize(
-      const InitializationSettings(android: androidSettings),
-    );
+      const androidSettings = AndroidInitializationSettings(
+        '@mipmap/ic_launcher',
+      );
+      await _localNotif.initialize(
+        const InitializationSettings(android: androidSettings),
+      );
+    }
 
     // Token refresh listener — jab bhi FCM naya token de
     _fcm.onTokenRefresh.listen((token) async {
@@ -151,38 +134,21 @@ class NotificationService {
 
     // Foreground messages
     FirebaseMessaging.onMessage.listen((RemoteMessage message) async {
-      await _showLocalNotification(message);
-
-      final prefs = await SharedPreferences.getInstance();
-      final savedRole = prefs.getString('user_role') ?? '';
-
-      if (savedRole == 'rider') {
-        final type = message.data['type'] ?? '';
-        if (type == 'new_order_available' || type == 'new_order') {
-          onNewOrderForRider?.call();
-        }
+      if (!kIsWeb) {
+        await _showLocalNotification(message);
       }
     });
 
-    // Background tap
-    FirebaseMessaging.onMessageOpenedApp.listen((RemoteMessage message) async {
-      final prefs = await SharedPreferences.getInstance();
-      final savedRole = prefs.getString('user_role') ?? '';
-      if (savedRole == 'rider') {
-        final type = message.data['type'] ?? '';
-        if (type == 'new_order_available' || type == 'new_order') {
-          onNewOrderForRider?.call();
-        }
-      }
-    });
+    // Background tap — notification tap karke app khole
+    // Note: koi special navigation abhi set nahi hai, future mein
+    // chaho to yahan order_status_screen pe navigate kar sakte ho
+    FirebaseMessaging.onMessageOpenedApp.listen(
+      (RemoteMessage message) async {},
+    );
   }
 
   // ── Local Notification Show ───────────────────────────────
   Future<void> _showLocalNotification(RemoteMessage message) async {
-    final notifType = message.data['type'] ?? '';
-    final isRiderOrder = notifType == 'new_order_available';
-    final isAdminOrder = notifType == 'new_order';
-
     final notifTitle =
         message.data['title'] ?? message.notification?.title ?? 'Streat Eats';
     final notifBody = message.data['body'] ?? message.notification?.body ?? '';
@@ -190,16 +156,13 @@ class NotificationService {
     if (notifTitle.isEmpty && notifBody.isEmpty) return;
 
     final androidDetails = AndroidNotificationDetails(
-      isRiderOrder ? 'street_eats_rider_orders' : 'street_eats_high',
-      isRiderOrder ? 'Rider New Orders' : 'Streat Eats Notifications',
-      channelDescription: isRiderOrder
-          ? 'New order alerts for Streat Eats riders'
-          : 'Order updates and offers from Streat Eats',
+      'street_eats_high',
+      'Streat Eats Notifications',
+      channelDescription: 'Order updates and offers from Streat Eats',
       importance: Importance.max,
       priority: Priority.high,
       playSound: true,
       enableVibration: true,
-      fullScreenIntent: isRiderOrder || isAdminOrder,
       visibility: NotificationVisibility.public,
       icon: '@mipmap/ic_launcher',
       largeIcon: const DrawableResourceAndroidBitmap('@mipmap/ic_launcher'),
@@ -219,15 +182,58 @@ class NotificationService {
   // Dono tables ke chakkar nahi — sirf device_tokens
   Future<void> _saveTokenToDb(String token, String userId) async {
     try {
-      await _supabase.from('device_tokens').upsert({
+      // Pehle is user ke saare purane tokens delete karo
+      await _supabase.from('device_tokens').delete().eq('user_id', userId);
+
+      // Sirf ek fresh token insert karo
+      await _supabase.from('device_tokens').insert({
         'fcm_token': token,
         'user_id': userId,
         'is_active': true,
+        'user_type': 'customer',
         'updated_at': DateTime.now().toIso8601String(),
-      }, onConflict: 'fcm_token');
-      debugPrint('FCM token saved ✅ for user: $userId');
+      });
+
+      debugPrint('FCM token saved ✅ customer: $userId');
     } catch (e) {
       debugPrint('FCM token save error: $e');
+    }
+  }
+
+  // ── PUBLIC: App start pe call karo (agar session already hai) ──
+  // Login/signup wale refreshTokenAfterLogin() jaisa delete-fresh nahi karta —
+  // sirf check karta hai ki DB mein active token hai ya nahi, nahi hai to save karta hai
+  // Isse FCM token kabhi silently stale nahi rahega, chahe user kabhi logout na kare
+  Future<void> refreshTokenIfNeeded() async {
+    final userId = _supabase.auth.currentUser?.id;
+    if (userId == null) {
+      debugPrint('FCM refreshTokenIfNeeded: userId null — skipping');
+      return;
+    }
+    try {
+      final existing = await _supabase
+          .from('device_tokens')
+          .select('fcm_token')
+          .eq('user_id', userId)
+          .eq('is_active', true)
+          .limit(1)
+          .maybeSingle();
+
+      // Token already DB mein active hai — sirf current FCM token le ke
+      // sync kar do (taaki token rotate ho gaya ho to bhi pakad le)
+      final token = await _fcm.getToken();
+      if (token == null) {
+        debugPrint('FCM refreshTokenIfNeeded: token null — skipping');
+        return;
+      }
+      if (existing == null) {
+        debugPrint(
+          'FCM refreshTokenIfNeeded: no active token in DB — saving fresh',
+        );
+      }
+      await _saveTokenToDb(token, userId);
+    } catch (e) {
+      debugPrint('FCM refreshTokenIfNeeded error: $e');
     }
   }
 
@@ -258,8 +264,10 @@ class NotificationService {
       }
     }
 
+    // ✅ FIX: token null bhi ho sakta hai (exception ke bina bhi) —
+    // save se pehle explicit null check taaki type mismatch na ho
     if (token == null) {
-      debugPrint('FCM refreshToken: token null after retries — skipping');
+      debugPrint('FCM refreshTokenAfterLogin: token null — skipping save');
       return;
     }
 

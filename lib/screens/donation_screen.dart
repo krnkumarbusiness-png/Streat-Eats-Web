@@ -6,9 +6,13 @@
 // ✅ All v2.0 features preserved
 
 import 'package:flutter/material.dart';
+import 'package:flutter/foundation.dart' show kIsWeb;
 import 'package:flutter/services.dart';
-import 'package:razorpay_flutter/razorpay_flutter.dart';
+// razorpay_flutter is Android/iOS only — on web we use RazorpayWebCheckout
+import 'package:razorpay_flutter/razorpay_flutter.dart'
+    if (dart.library.js_interop) '../services/razorpay_web_checkout.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
+import '../services/razorpay_web_checkout.dart';
 
 class DonationScreen extends StatefulWidget {
   const DonationScreen({super.key});
@@ -54,7 +58,8 @@ class _DonationScreenState extends State<DonationScreen>
       'Your small contribution can bring joy to their lives. '
       'Donate through Street Eats and help our city\'s furry friends! 🐕';
 
-  late Razorpay _razorpay;
+  // _razorpay is null on web — we use RazorpayWebCheckout instead.
+  Razorpay? _razorpay;
   late AnimationController _heartController;
   late AnimationController _pawController;
   late Animation<double> _heartAnim;
@@ -86,10 +91,13 @@ class _DonationScreenState extends State<DonationScreen>
       end: 8.0,
     ).animate(CurvedAnimation(parent: _pawController, curve: Curves.easeInOut));
 
-    _razorpay = Razorpay();
-    _razorpay.on(Razorpay.EVENT_PAYMENT_SUCCESS, _onPaymentSuccess);
-    _razorpay.on(Razorpay.EVENT_PAYMENT_ERROR, _onPaymentError);
-    _razorpay.on(Razorpay.EVENT_EXTERNAL_WALLET, _onExternalWallet);
+    // Native Razorpay SDK — not used on web
+    if (!kIsWeb) {
+      _razorpay = Razorpay();
+      _razorpay!.on(Razorpay.EVENT_PAYMENT_SUCCESS, _onPaymentSuccess);
+      _razorpay!.on(Razorpay.EVENT_PAYMENT_ERROR, _onPaymentError);
+      _razorpay!.on(Razorpay.EVENT_EXTERNAL_WALLET, _onExternalWallet);
+    }
 
     _loadStats();
   }
@@ -98,7 +106,7 @@ class _DonationScreenState extends State<DonationScreen>
   void dispose() {
     _heartController.dispose();
     _pawController.dispose();
-    _razorpay.clear();
+    _razorpay?.clear(); // null-safe: no-op on web
     _customController.dispose();
     super.dispose();
   }
@@ -236,11 +244,11 @@ class _DonationScreenState extends State<DonationScreen>
 
       setState(() => _isLoading = false);
 
-      // ── Step 4: Razorpay checkout open karo ──────────────
+      // ── Step 4: Open checkout ────────────────────────────
       final options = {
-        'key': razorpayKeyId, // ✅ Server se aaya — hardcoded nahi
-        'order_id': razorpayOrderId, // ✅ Server created order
-        'amount': amount * 100, // paise mein
+        'key': razorpayKeyId,
+        'order_id': razorpayOrderId,
+        'amount': amount * 100,
         'currency': 'INR',
         'name': 'Streat Eats',
         'description': 'Feeding stray dogs in Haldwani 🐕',
@@ -251,10 +259,23 @@ class _DonationScreenState extends State<DonationScreen>
         },
         'theme': {'color': '#FF6B35'},
         'notes': {'donation_id': donationId, 'type': 'dog_donation'},
-        'modal': {'confirm_close': true, 'animation': true},
       };
 
-      _razorpay.open(options);
+      if (kIsWeb) {
+        // ── WEB: Razorpay JS Checkout ───────────────────────────
+        RazorpayWebCheckout.open(
+          options: options,
+          onSuccess: (paymentId, orderId, signature) {
+            _onPaymentSuccessWeb(paymentId, orderId, signature);
+          },
+          onError: (code, message) {
+            _onPaymentErrorWeb(code, message);
+          },
+        );
+      } else {
+        // ── NATIVE: Razorpay Flutter SDK ───────────────────────
+        _razorpay!.open(options);
+      }
     } catch (e) {
       debugPrint('DonationScreen: _startDonation error — $e');
       if (mounted) {
@@ -304,6 +325,19 @@ class _DonationScreenState extends State<DonationScreen>
 
   void _onExternalWallet(ExternalWalletResponse response) {
     debugPrint('External wallet: ${response.walletName}');
+  }
+
+  // ── WEB-ONLY callbacks (called from RazorpayWebCheckout) ──────
+  void _onPaymentSuccessWeb(
+    String paymentId,
+    String orderId,
+    String signature,
+  ) {
+    _onPaymentSuccess(PaymentSuccessResponse(paymentId, orderId, signature));
+  }
+
+  void _onPaymentErrorWeb(int code, String message) {
+    _onPaymentError(PaymentFailureResponse(code, message));
   }
 
   // ── Thank You Dialog ──────────────────────────────────────

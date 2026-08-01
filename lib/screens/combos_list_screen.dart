@@ -3,6 +3,13 @@ import 'package:flutter/material.dart';
 import '../constants/colors.dart';
 import '../models/combo_model.dart';
 import '../services/combo_service.dart';
+import 'package:flutter/services.dart';
+import 'package:provider/provider.dart';
+import '../providers/cart_provider.dart';
+import '../models/menu_item_model.dart';
+import '../services/vendor_service.dart';
+import '../utils/cart_utils.dart';
+import '../constants/app_snackbar.dart';
 import 'combo_detail_screen.dart';
 
 class CombosListScreen extends StatefulWidget {
@@ -85,8 +92,14 @@ class _CombosListScreenState extends State<CombosListScreen> {
           : RefreshIndicator(
               onRefresh: _load,
               color: AppColors.primary,
-              child: ListView.builder(
+              child: GridView.builder(
                 padding: const EdgeInsets.fromLTRB(16, 16, 16, 24),
+                gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
+                  crossAxisCount: 2,
+                  crossAxisSpacing: 16,
+                  mainAxisSpacing: 16,
+                  childAspectRatio: 0.72,
+                ),
                 itemCount: _combos.length,
                 itemBuilder: (_, i) => _ComboListCard(
                   combo: _combos[i],
@@ -103,67 +116,20 @@ class _CombosListScreenState extends State<CombosListScreen> {
   }
 
   Widget _buildShimmer() {
-    return ListView.builder(
+    return GridView.builder(
       padding: const EdgeInsets.all(16),
-      itemCount: 4,
+      gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
+        crossAxisCount: 2,
+        crossAxisSpacing: 16,
+        mainAxisSpacing: 16,
+        childAspectRatio: 0.72,
+      ),
+      itemCount: 6,
       itemBuilder: (_, __) => Container(
-        margin: const EdgeInsets.only(bottom: 14),
-        height: 130,
         decoration: BoxDecoration(
           color: Colors.white,
           borderRadius: BorderRadius.circular(16),
           border: Border.all(color: const Color(0xFFE5E7EB)),
-        ),
-        child: Row(
-          children: [
-            Container(
-              width: 110,
-              decoration: BoxDecoration(
-                color: const Color(0xFFF3F4F6),
-                borderRadius: const BorderRadius.horizontal(
-                  left: Radius.circular(15),
-                ),
-              ),
-            ),
-            const SizedBox(width: 14),
-            Expanded(
-              child: Padding(
-                padding: const EdgeInsets.symmetric(vertical: 16),
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Container(
-                      height: 14,
-                      width: 140,
-                      decoration: BoxDecoration(
-                        color: const Color(0xFFF3F4F6),
-                        borderRadius: BorderRadius.circular(4),
-                      ),
-                    ),
-                    const SizedBox(height: 8),
-                    Container(
-                      height: 11,
-                      width: 100,
-                      decoration: BoxDecoration(
-                        color: const Color(0xFFF3F4F6),
-                        borderRadius: BorderRadius.circular(4),
-                      ),
-                    ),
-                    const Spacer(),
-                    Container(
-                      height: 14,
-                      width: 60,
-                      decoration: BoxDecoration(
-                        color: const Color(0xFFF3F4F6),
-                        borderRadius: BorderRadius.circular(4),
-                      ),
-                    ),
-                  ],
-                ),
-              ),
-            ),
-            const SizedBox(width: 12),
-          ],
         ),
       ),
     );
@@ -229,267 +195,338 @@ class _ComboListCard extends StatelessWidget {
     return GestureDetector(
       onTap: onTap,
       child: Container(
-        margin: const EdgeInsets.only(bottom: 14),
         decoration: BoxDecoration(
           color: Colors.white,
-          borderRadius: BorderRadius.circular(18),
-          border: Border.all(color: const Color(0xFFE5E7EB)),
+          borderRadius: BorderRadius.circular(16),
+          border: Border.all(color: const Color(0xFFEEEEEE), width: 0.8),
           boxShadow: [
             BoxShadow(
               color: Colors.black.withOpacity(0.05),
-              blurRadius: 10,
-              offset: const Offset(0, 3),
+              blurRadius: 8,
+              offset: const Offset(0, 2),
             ),
           ],
         ),
         child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          mainAxisSize: MainAxisSize.min,
           children: [
-            // ── Top section: image + content ──
-            IntrinsicHeight(
-              child: Row(
-                crossAxisAlignment: CrossAxisAlignment.stretch,
-                children: [
-                  // Image
-                  ClipRRect(
-                    borderRadius: const BorderRadius.only(
-                      topLeft: Radius.circular(17),
-                      bottomLeft: Radius.circular(
-                        0,
-                      ), // will be controlled by outer column
-                    ),
-                    child: Stack(
-                      children: [
-                        SizedBox(
-                          width: 110,
-                          child: hasImage
-                              ? CachedNetworkImage(
-                                  imageUrl: combo.imageUrl!,
-                                  fit: BoxFit.cover,
-                                  errorWidget: (_, __, ___) => _placeholder(),
-                                )
-                              : _placeholder(),
-                        ),
-                        if (hasDiscount)
-                          Positioned(
-                            top: 8,
-                            left: 8,
-                            child: Container(
-                              padding: const EdgeInsets.symmetric(
-                                horizontal: 7,
-                                vertical: 3,
-                              ),
-                              decoration: BoxDecoration(
-                                color: AppColors.error,
-                                borderRadius: BorderRadius.circular(6),
-                              ),
-                              child: Text(
-                                '${combo.discountPercent}% OFF',
-                                style: const TextStyle(
-                                  color: Colors.white,
-                                  fontSize: 9,
-                                  fontWeight: FontWeight.w800,
-                                  fontFamily: 'Poppins',
-                                ),
-                              ),
+            // ── Image ──────────────────────────────────────
+            SizedBox(
+              height: 160,
+              width: double.infinity,
+              child: ClipRRect(
+                borderRadius: const BorderRadius.vertical(
+                  top: Radius.circular(15),
+                ),
+                child: Stack(
+                  fit: StackFit.expand,
+                  children: [
+                    hasImage
+                        ? CachedNetworkImage(
+                            imageUrl: combo.imageUrl!,
+                            fit: BoxFit.cover,
+                            width: double.infinity,
+                            height: 160,
+                            errorWidget: (_, __, ___) => _imgPh(),
+                          )
+                        : _imgPh(),
+
+                    // OFF badge — bottom left
+                    if (hasDiscount)
+                      Positioned(
+                        bottom: 8,
+                        left: 8,
+                        child: Container(
+                          padding: const EdgeInsets.symmetric(
+                            horizontal: 8,
+                            vertical: 3,
+                          ),
+                          decoration: BoxDecoration(
+                            color: AppColors.error,
+                            borderRadius: BorderRadius.circular(6),
+                          ),
+                          child: Text(
+                            '₹${(combo.originalPrice! - combo.appPrice).toStringAsFixed(0)} OFF',
+                            style: const TextStyle(
+                              color: Colors.white,
+                              fontSize: 9,
+                              fontWeight: FontWeight.w800,
+                              fontFamily: 'Poppins',
                             ),
                           ),
-                      ],
+                        ),
+                      ),
+
+                    // Add button — bottom right
+                    Positioned(
+                      bottom: 8,
+                      right: 8,
+                      child: _ComboListAddButton(combo: combo),
                     ),
+                  ],
+                ),
+              ),
+            ),
+
+            // ── Info ───────────────────────────────────────
+            Padding(
+              padding: const EdgeInsets.fromLTRB(10, 8, 10, 10),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  // Item name
+                  Text(
+                    combo.name,
+                    style: const TextStyle(
+                      fontFamily: 'Poppins',
+                      fontSize: 13,
+                      fontWeight: FontWeight.w800,
+                      color: Color(0xFF1A1A1A),
+                      height: 1.2,
+                    ),
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
                   ),
 
-                  // Content
-                  Expanded(
-                    child: Padding(
-                      padding: const EdgeInsets.fromLTRB(14, 14, 14, 12),
-                      child: Column(
-                        crossAxisAlignment: CrossAxisAlignment.start,
-                        children: [
-                          // Combo tag
-                          Container(
-                            padding: const EdgeInsets.symmetric(
-                              horizontal: 7,
-                              vertical: 2,
-                            ),
-                            decoration: BoxDecoration(
-                              color: AppColors.primary.withOpacity(0.08),
-                              borderRadius: BorderRadius.circular(5),
-                            ),
-                            child: Text(
-                              'COMBO',
-                              style: TextStyle(
-                                fontFamily: 'Poppins',
-                                fontSize: 9,
-                                fontWeight: FontWeight.w800,
-                                color: AppColors.primary,
-                                letterSpacing: 0.8,
-                              ),
-                            ),
+                  const SizedBox(height: 6),
+
+                  // Price row
+                  Row(
+                    crossAxisAlignment: CrossAxisAlignment.center,
+                    children: [
+                      // Price box
+                      Container(
+                        padding: const EdgeInsets.symmetric(
+                          horizontal: 8,
+                          vertical: 4,
+                        ),
+                        decoration: BoxDecoration(
+                          color: AppColors.primary,
+                          borderRadius: BorderRadius.circular(7),
+                        ),
+                        child: Text(
+                          '₹${combo.appPrice.toStringAsFixed(0)}',
+                          style: const TextStyle(
+                            fontFamily: 'Poppins',
+                            fontSize: 13,
+                            fontWeight: FontWeight.w800,
+                            color: Colors.white,
                           ),
-                          const SizedBox(height: 6),
-                          Text(
-                            combo.name,
-                            style: const TextStyle(
-                              fontFamily: 'Poppins',
-                              fontSize: 15,
-                              fontWeight: FontWeight.w700,
-                              color: Color(0xFF1A1A1A),
-                              height: 1.3,
-                            ),
-                            maxLines: 2,
-                            overflow: TextOverflow.ellipsis,
-                          ),
-                          if (combo.description.isNotEmpty) ...[
-                            const SizedBox(height: 4),
-                            Text(
-                              combo.description,
-                              style: const TextStyle(
-                                fontFamily: 'Poppins',
-                                fontSize: 11,
-                                color: Color(0xFF6B7280),
-                                height: 1.4,
-                              ),
-                              maxLines: 2,
-                              overflow: TextOverflow.ellipsis,
-                            ),
-                          ],
-                          const Spacer(),
-                          Row(
-                            crossAxisAlignment: CrossAxisAlignment.baseline,
-                            textBaseline: TextBaseline.alphabetic,
-                            children: [
-                              Text(
-                                '₹${combo.appPrice.toStringAsFixed(0)}',
-                                style: TextStyle(
-                                  fontFamily: 'Poppins',
-                                  fontSize: 20,
-                                  fontWeight: FontWeight.w900,
-                                  color: AppColors.primary,
-                                  height: 1,
-                                ),
-                              ),
-                              if (hasDiscount) ...[
-                                const SizedBox(width: 6),
-                                Text(
-                                  '₹${combo.originalPrice!.toStringAsFixed(0)}',
-                                  style: const TextStyle(
-                                    fontFamily: 'Poppins',
-                                    fontSize: 12,
-                                    color: Color(0xFF6B7280),
-                                    decoration: TextDecoration.lineThrough,
-                                  ),
-                                ),
-                              ],
-                            ],
-                          ),
-                        ],
+                        ),
                       ),
-                    ),
+                      // Strikethrough original price
+                      if (hasDiscount) ...[
+                        const SizedBox(width: 5),
+                        Text(
+                          '₹${combo.originalPrice!.toStringAsFixed(0)}',
+                          style: const TextStyle(
+                            fontFamily: 'Poppins',
+                            fontSize: 11,
+                            color: Color(0xFF6B7280),
+                            decoration: TextDecoration.lineThrough,
+                            decorationColor: Color(0xFF6B7280),
+                          ),
+                        ),
+                      ],
+                    ],
                   ),
                 ],
               ),
             ),
-
-            // ── Bottom strip: includes + button ──
-            if (combo.itemsIncluded.isNotEmpty)
-              Container(
-                padding: const EdgeInsets.symmetric(
-                  horizontal: 14,
-                  vertical: 10,
-                ),
-                decoration: const BoxDecoration(
-                  color: Color(0xFFFFF8F0),
-                  borderRadius: BorderRadius.only(
-                    bottomLeft: Radius.circular(17),
-                    bottomRight: Radius.circular(17),
-                  ),
-                  border: Border(top: BorderSide(color: Color(0xFFE5E7EB))),
-                ),
-                child: Row(
-                  children: [
-                    Text('🎁  ', style: const TextStyle(fontSize: 12)),
-                    Expanded(
-                      child: Text(
-                        combo.itemsIncluded,
-                        style: TextStyle(
-                          fontFamily: 'Poppins',
-                          fontSize: 11,
-                          color: AppColors.primary,
-                          fontWeight: FontWeight.w600,
-                        ),
-                        maxLines: 1,
-                        overflow: TextOverflow.ellipsis,
-                      ),
-                    ),
-                    const SizedBox(width: 8),
-                    Container(
-                      padding: const EdgeInsets.symmetric(
-                        horizontal: 14,
-                        vertical: 7,
-                      ),
-                      decoration: BoxDecoration(
-                        color: AppColors.primary,
-                        borderRadius: BorderRadius.circular(10),
-                      ),
-                      child: const Text(
-                        'View Deal →',
-                        style: TextStyle(
-                          color: Colors.white,
-                          fontSize: 11,
-                          fontWeight: FontWeight.w700,
-                          fontFamily: 'Poppins',
-                        ),
-                      ),
-                    ),
-                  ],
-                ),
-              )
-            else
-              Container(
-                padding: const EdgeInsets.symmetric(
-                  horizontal: 14,
-                  vertical: 10,
-                ),
-                decoration: const BoxDecoration(
-                  color: Color(0xFFFFF8F0),
-                  borderRadius: BorderRadius.only(
-                    bottomLeft: Radius.circular(17),
-                    bottomRight: Radius.circular(17),
-                  ),
-                  border: Border(top: BorderSide(color: Color(0xFFE5E7EB))),
-                ),
-                child: Row(
-                  mainAxisAlignment: MainAxisAlignment.end,
-                  children: [
-                    Container(
-                      padding: const EdgeInsets.symmetric(
-                        horizontal: 14,
-                        vertical: 7,
-                      ),
-                      decoration: BoxDecoration(
-                        color: AppColors.primary,
-                        borderRadius: BorderRadius.circular(10),
-                      ),
-                      child: const Text(
-                        'View Deal →',
-                        style: TextStyle(
-                          color: Colors.white,
-                          fontSize: 11,
-                          fontWeight: FontWeight.w700,
-                          fontFamily: 'Poppins',
-                        ),
-                      ),
-                    ),
-                  ],
-                ),
-              ),
           ],
         ),
       ),
     );
   }
 
-  Widget _placeholder() => Container(
+  Widget _imgPh() => Container(
     color: AppColors.primary.withOpacity(0.06),
-    child: const Center(child: Text('🎁', style: TextStyle(fontSize: 38))),
+    child: const Center(child: Text('🎁', style: TextStyle(fontSize: 40))),
   );
 }
+
+class _ComboListAddButton extends StatefulWidget {
+  final ComboModel combo;
+  const _ComboListAddButton({Key? key, required this.combo}) : super(key: key);
+
+  @override
+  State<_ComboListAddButton> createState() => _ComboListAddButtonState();
+}
+
+class _ComboListAddButtonState extends State<_ComboListAddButton> {
+  bool _isAdding = false;
+
+  void _addToCart() async {
+    setState(() => _isAdding = true);
+    try {
+      final vendor = await VendorService().getVendorById(widget.combo.vendorId);
+      if (!mounted) return;
+
+      if (vendor == null) {
+        setState(() => _isAdding = false);
+        AppSnackBar.showError(context, 'Vendor not found');
+        return;
+      }
+
+      final comboAsItem = MenuItemModel(
+        id: widget.combo.id,
+        vendorId: widget.combo.vendorId,
+        vendorName: vendor.name,
+        name: '🎁 ${widget.combo.name}',
+        description: widget.combo.description,
+        vendorPrice: widget.combo.vendorPrice,
+        appPrice: widget.combo.appPrice,
+        originalPrice: widget.combo.originalPrice,
+        isDiscounted: widget.combo.isDiscounted,
+        category: 'Combo',
+        isAvailable: true,
+        imageUrl: widget.combo.imageUrl,
+      );
+
+      CartUtils.handleCartAddItem(
+        context,
+        comboAsItem,
+        vendor,
+        onSuccess: () {
+          if (mounted) setState(() => _isAdding = false);
+        },
+        onLimitReached: () {
+          if (mounted) setState(() => _isAdding = false);
+          AppSnackBar.showError(context, 'Cart limit reached!');
+        },
+      );
+    } catch (e) {
+      if (mounted) setState(() => _isAdding = false);
+      AppSnackBar.showError(context, 'Failed to add item');
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final qty = context.watch<CartProvider>().getQuantity(widget.combo.id);
+
+    if (qty > 0) {
+      return Container(
+        height: 32,
+        decoration: BoxDecoration(
+          color: const Color(0xFFDCFCE7),
+          borderRadius: BorderRadius.circular(8),
+          border: Border.all(
+            color: const Color(0xFF16A34A),
+            width: 1.5,
+          ),
+        ),
+        child: Row(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            GestureDetector(
+              onTap: () {
+                HapticFeedback.selectionClick();
+                context.read<CartProvider>().removeItem(widget.combo.id);
+              },
+              child: Container(
+                width: 32,
+                height: 32,
+                decoration: const BoxDecoration(
+                  borderRadius: BorderRadius.only(
+                    topLeft: Radius.circular(8),
+                    bottomLeft: Radius.circular(8),
+                  ),
+                ),
+                child: const Icon(
+                  Icons.remove_rounded,
+                  color: Color(0xFF16A34A),
+                  size: 16,
+                ),
+              ),
+            ),
+            Padding(
+              padding: const EdgeInsets.symmetric(horizontal: 10),
+              child: Text(
+                '$qty',
+                style: const TextStyle(
+                  color: Color(0xFF16A34A),
+                  fontWeight: FontWeight.w800,
+                  fontSize: 14,
+                  fontFamily: 'Poppins',
+                ),
+              ),
+            ),
+            GestureDetector(
+              onTap: () {
+                if (!_isAdding) _addToCart();
+              },
+              child: Container(
+                width: 32,
+                height: 32,
+                decoration: const BoxDecoration(
+                  borderRadius: BorderRadius.only(
+                    topRight: Radius.circular(8),
+                    bottomRight: Radius.circular(8),
+                  ),
+                ),
+                child: _isAdding
+                    ? const Padding(
+                        padding: EdgeInsets.all(8.0),
+                        child: CircularProgressIndicator(
+                          color: Color(0xFF16A34A),
+                          strokeWidth: 2.0,
+                        ),
+                      )
+                    : const Icon(
+                        Icons.add_rounded,
+                        color: Color(0xFF16A34A),
+                        size: 16,
+                      ),
+              ),
+            ),
+          ],
+        ),
+      );
+    }
+
+    return GestureDetector(
+      onTap: () {
+        if (!_isAdding) _addToCart();
+      },
+      child: Container(
+        padding: const EdgeInsets.symmetric(
+          horizontal: 12,
+          vertical: 6,
+        ),
+        decoration: BoxDecoration(
+          color: const Color(0xFF16A34A),
+          borderRadius: BorderRadius.circular(8),
+          boxShadow: [
+            BoxShadow(
+              color: Colors.black.withOpacity(0.2),
+              blurRadius: 6,
+              offset: const Offset(0, 2),
+            ),
+          ],
+        ),
+        child: _isAdding
+            ? const SizedBox(
+                width: 15,
+                height: 15,
+                child: CircularProgressIndicator(
+                  color: Colors.white,
+                  strokeWidth: 2.5,
+                ),
+              )
+            : const Text(
+                'Add +',
+                style: TextStyle(
+                  fontFamily: 'Poppins',
+                  fontSize: 13,
+                  fontWeight: FontWeight.w800,
+                  color: Colors.white,
+                ),
+              ),
+      ),
+    );
+  }
+}
+

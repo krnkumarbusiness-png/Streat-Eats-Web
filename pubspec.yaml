@@ -1,7 +1,7 @@
 name: streat_eats
 description: "Streat Eats - Haldwani ka street food delivery app"
 publish_to: 'none'
-version: 1.1.46+57
+version: 1.1.55+66
 
 environment:
   sdk: ^3.9.0
@@ -64,9 +64,15 @@ flutter_launcher_icons:
 flutter:
   uses-material-design: true
   assets:
+    - .env
     - assets/icon.png
     - assets/images/
     - assets/lottie/
     - assets/sounds/
     - assets/fonts/
-    - .env
+  fonts:
+    - family: SpaceMono
+      fonts:
+        - asset: assets/fonts/SpaceMono-Regular.ttf
+        - asset: assets/fonts/SpaceMono-Bold.ttf
+          weight: 700

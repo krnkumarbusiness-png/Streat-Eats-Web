@@ -19,6 +19,8 @@ import '../models/delivery_address_model.dart';
 
 typedef PortionType = String?;
 
+enum CartAddResult { success, limitReached, vendorConflict }
+
 class CartItem {
   final MenuItemModel item;
   final VendorModel vendor;
@@ -197,12 +199,20 @@ class CartProvider extends ChangeNotifier {
   double _deliveryCharge2_3 = 20;
   double _deliveryCharge3_4 = 30;
   double _deliveryCharge4_5 = 40;
-  double _deliveryCharge5Plus = 50;
+  double _deliveryChargeExtraPerKm = 10;
 
-  // v3.0 — Packaging fee slabs
+  // v3.0 — Packaging fee slabs (updated to match DB column names)
+  bool _packagingEnabled = true;
+  double _packagingThresholdSmall = 99;
+  double _packagingThresholdMedium = 199;
   double _packagingFee0_99 = 2.0;
   double _packagingFee100_199 = 5.0;
   double _packagingFee200Plus = 8.0;
+
+  // ── Free Delivery Controls ───────────────────────────────────
+  bool _freeDeliveryEnabled = false;
+  double _freeDeliveryMinAmount = 0.0;
+  double _freeDeliveryMaxDistance = 0.0;
 
   // v4.0 — Fallback km for manual address (uses max slab charge)
   static const double _manualAddressFallbackKm = 4.5;
@@ -237,64 +247,136 @@ class CartProvider extends ChangeNotifier {
   double get platformFee => _items.isEmpty ? 0 : _platformFee;
 
   // v3.0 — Packaging fee (subtotal based slab)
+  // ✅ FIX: packaging_enabled = false hone par 0 return karo
+  // Multi-vendor: har vendor ke items ka subtotal alag calculate karo
   double get packagingFee {
     if (_items.isEmpty) return 0;
-    final sub = subtotal;
-    if (sub < 100) return _packagingFee0_99;
-    if (sub < 200) return _packagingFee100_199;
-    return _packagingFee200Plus;
+    if (!_packagingEnabled) return 0; // ✅ Admin se off kiya = no fee
+    final uniqueVendorIds = _items.values.map((ci) => ci.vendor.id).toSet();
+    if (uniqueVendorIds.length <= 1) {
+      final sub = subtotal;
+      if (sub <= _packagingThresholdSmall) return _packagingFee0_99;
+      if (sub <= _packagingThresholdMedium) return _packagingFee100_199;
+      return _packagingFee200Plus;
+    }
+    // Multi-vendor: har vendor ka alag packaging fee
+    double total = 0;
+    for (final vendorId in uniqueVendorIds) {
+      final vendorSubtotal = _items.values
+          .where((ci) => ci.vendor.id == vendorId)
+          .fold(0.0, (sum, ci) => sum + ci.totalPrice);
+      if (vendorSubtotal <= _packagingThresholdSmall) {
+        total += _packagingFee0_99;
+      } else if (vendorSubtotal <= _packagingThresholdMedium) {
+        total += _packagingFee100_199;
+      } else {
+        total += _packagingFee200Plus;
+      }
+    }
+    return total;
   }
 
-  // ── v4.1 FIXED: deliveryCharge — correct priority order ─────
+  // ── FIXED: deliveryCharge — multi-vendor sum ─────────────────
   //
-  // Priority:
-  //   1. GPS DeliveryAddress (checkout mein select kiya) → addr.distanceKm
-  //   2. Manual DeliveryAddress → fallback km (safe max slab)
-  //   3. _currentDistanceKm (set by home/street food/item detail screen)
-  //   4. vendor.distanceKm from cart items (legacy fallback)
-  //   5. 0 (no distance info at all)
+  // Multi-vendor logic:
+  //   - Har unique vendor ka alag delivery charge calculate karo
+  //   - Saare charges add karo — 20+20 = 40
+  //   - Single vendor case mein same behaviour as before
   //
-  // ── Multi-vendor max distance calculation ──────────────────
-  // Saare unique vendors ki distance calculate karo GPS se
-  // Sabse door wale vendor ki distance se delivery charge lagao
+  // Priority for per-vendor distance:
+  //   1. _confirmedPinDistanceKm — checkout map pin (single distance, sabse accurate)
+  //      Multi-vendor mein ye use nahi hota — per-vendor distance use hoti hai
+  //   2. Manual address — fallback km (safe max slab) × vendor count
+  //   3. vendor.distanceKm from cart items
+  //   4. _currentDistanceKm — single vendor fallback
+  //   5. 0
   double get deliveryCharge {
     if (_items.isEmpty) return 0;
 
-    // Priority 0: User ne checkout mein map pe exact pin confirm kiya hai
-    // — ye sabse accurate hai, sabse pehle check karo
-    if (_confirmedPinDistanceKm != null && _confirmedPinDistanceKm! > 0) {
-      return calculateDeliveryCharge(_confirmedPinDistanceKm!);
-    }
-
     final addr = _selectedDeliveryAddress;
+    final uniqueVendors = vendors; // List<VendorModel> — unique vendors
 
-    // Priority 1: Manual address — safe fallback (no GPS needed)
+    // ── Manual address: fallback slab × vendor count ────────────
     if (addr != null && addr.isManual) {
-      return calculateDeliveryCharge(_manualAddressFallbackKm);
+      double total = 0;
+      for (int i = 0; i < uniqueVendors.length; i++) {
+        total += calculateDeliveryCharge(_manualAddressFallbackKm);
+      }
+      return total;
     }
 
-    // Priority 2: GPS address with known distance (checkout se set)
+    // ── Confirmed pin (checkout map) — per-vendor distance calculate karo ──
+    // _confirmedPinDistanceKm = customer ka exact location distance from farthest vendor
+    // Multi-vendor mein: har vendor ki individual distance chahiye
+    // Lekin pin se per-vendor distance available nahi hai (sirf max tha)
+    // Toh: vendor.distanceKm use karo agar available ho, warna confirmed pin ka charge
+    if (_confirmedPinDistanceKm != null && _confirmedPinDistanceKm! > 0) {
+      // Check karo: kya saare vendors ki individual distanceKm available hai?
+      final allHaveDist = uniqueVendors.every(
+        (v) => v.distanceKm != null && v.distanceKm! > 0,
+      );
+      if (allHaveDist) {
+        // Har vendor ka alag charge add karo
+        double total = 0;
+        for (final v in uniqueVendors) {
+          total += calculateDeliveryCharge(v.distanceKm!);
+        }
+        return total;
+      }
+      // Individual distances nahi hain — confirmed pin ka charge × vendor count
+      return calculateDeliveryCharge(_confirmedPinDistanceKm!) *
+          uniqueVendors.length;
+    }
+
+    // ── GPS address with known distance ─────────────────────────
     if (addr != null && addr.isGps && addr.distanceKm != null) {
-      return calculateDeliveryCharge(addr.distanceKm!);
+      final allHaveDist = uniqueVendors.every(
+        (v) => v.distanceKm != null && v.distanceKm! > 0,
+      );
+      if (allHaveDist) {
+        double total = 0;
+        for (final v in uniqueVendors) {
+          total += calculateDeliveryCharge(v.distanceKm!);
+        }
+        return total;
+      }
+      return calculateDeliveryCharge(addr.distanceKm!) * uniqueVendors.length;
     }
 
-    // Priority 3: _currentDistanceKm — explicitly set by home/detail screen
-    // Ye single vendor case ke liye fallback hai
+    // ── vendor.distanceKm available hai — har vendor ka alag charge ──
+    final allHaveDist = uniqueVendors.every(
+      (v) => v.distanceKm != null && v.distanceKm! > 0,
+    );
+    if (allHaveDist) {
+      double total = 0;
+      for (final v in uniqueVendors) {
+        total += calculateDeliveryCharge(v.distanceKm!);
+      }
+      return total;
+    }
+
+    // ── Partial: kuch vendors ki distance available, kuch ki nahi ──
+    // Jo available hai unka charge lo, baaki ke liye _currentDistanceKm fallback
+    double total = 0;
+    bool anyDist = false;
+    for (final v in uniqueVendors) {
+      final d = v.distanceKm ?? 0;
+      if (d > 0) {
+        total += calculateDeliveryCharge(d);
+        anyDist = true;
+      } else if (_currentDistanceKm != null && _currentDistanceKm! > 0) {
+        total += calculateDeliveryCharge(_currentDistanceKm!);
+        anyDist = true;
+      }
+    }
+    if (anyDist) return total;
+
+    // ── Last resort fallback ─────────────────────────────────────
     if (_currentDistanceKm != null && _currentDistanceKm! > 0) {
-      return calculateDeliveryCharge(_currentDistanceKm!);
+      return calculateDeliveryCharge(_currentDistanceKm!) *
+          uniqueVendors.length;
     }
 
-    // Priority 4: vendor.distanceKm from all cart vendors — max wala lo
-    double maxDist = 0;
-    for (final ci in _items.values) {
-      final d = ci.vendor.distanceKm ?? 0;
-      if (d > maxDist) maxDist = d;
-    }
-    if (maxDist > 0) {
-      return calculateDeliveryCharge(maxDist);
-    }
-
-    // Priority 5: No distance info — 0-1km slab (free)
     return calculateDeliveryCharge(0);
   }
 
@@ -325,8 +407,20 @@ class CartProvider extends ChangeNotifier {
   }
 
   // v3.0 — total includes packaging fee
+  // v5.0 — includes addonSubtotal and subtracts cart threshold discount
   double get total =>
-      subtotal + platformFee + deliveryCharge + packagingFee + _tipAmount;
+      (subtotal + platformFee + deliveryCharge + packagingFee + _tipAmount + addonSubtotal - _appliedDiscount)
+          .clamp(0.0, double.infinity);
+
+  // ── Single source of truth for cash round-off ──────────────────
+  // Applied identically for COD and Online so the displayed total
+  // never mismatches between payment methods or screens
+  double get cashRoundOff {
+    final rounded = total.roundToDouble();
+    return rounded - total;
+  }
+
+  double get roundedTotal => total.roundToDouble();
 
   // ── Tip Amount ───────────────────────────────────────────────
   int _tipAmount = 0;
@@ -335,6 +429,72 @@ class CartProvider extends ChangeNotifier {
   void setTip(int amount) {
     _tipAmount = amount;
     notifyListeners();
+  }
+
+  // ── Cart Threshold Discount ──────────────────────────────────
+  int _appliedDiscount = 0;
+  int get appliedDiscount => _appliedDiscount;
+  Map<String, dynamic>? _appliedOfferDetails;
+  Map<String, dynamic>? get appliedOfferDetails => _appliedOfferDetails;
+
+  void applyDiscount(int amount, {Map<String, dynamic>? offerDetails}) {
+    _appliedDiscount = amount;
+    _appliedOfferDetails = offerDetails;
+    notifyListeners();
+  }
+
+  void clearDiscount() {
+    _appliedDiscount = 0;
+    _appliedOfferDetails = null;
+    notifyListeners();
+  }
+
+  // ── Selected Addon Items ─────────────────────────────────────
+  List<Map<String, dynamic>> _selectedAddons = [];
+  List<Map<String, dynamic>> get selectedAddons => _selectedAddons;
+
+  double get addonSubtotal => _selectedAddons.fold(
+    0.0,
+    (sum, a) => sum + ((a['price'] as int? ?? 0) * (a['quantity'] as int? ?? 1)),
+  );
+
+  void addAddon(Map<String, dynamic> addon) {
+    final idx = _selectedAddons.indexWhere((a) => a['id'] == addon['id']);
+    if (idx >= 0) {
+      _selectedAddons[idx] = {
+        ..._selectedAddons[idx],
+        'quantity': (_selectedAddons[idx]['quantity'] as int? ?? 1) + 1,
+      };
+    } else {
+      _selectedAddons.add({...addon, 'quantity': 1});
+    }
+    notifyListeners();
+  }
+
+  void removeAddon(String addonId) {
+    final idx = _selectedAddons.indexWhere((a) => a['id'] == addonId);
+    if (idx < 0) return;
+    final currentQty = _selectedAddons[idx]['quantity'] as int? ?? 1;
+    if (currentQty <= 1) {
+      _selectedAddons.removeAt(idx);
+    } else {
+      _selectedAddons[idx] = {
+        ..._selectedAddons[idx],
+        'quantity': currentQty - 1,
+      };
+    }
+    notifyListeners();
+  }
+
+  void clearAddons() {
+    _selectedAddons = [];
+    notifyListeners();
+  }
+
+  int getAddonQuantity(String addonId) {
+    final idx = _selectedAddons.indexWhere((a) => a['id'] == addonId);
+    if (idx < 0) return 0;
+    return _selectedAddons[idx]['quantity'] as int? ?? 0;
   }
 
   // Referral discount = sum of all markup (app_price - vendor_price) × quantity
@@ -369,12 +529,16 @@ class CartProvider extends ChangeNotifier {
   String? get _currentUserId => Supabase.instance.client.auth.currentUser?.id;
 
   double calculateDeliveryCharge(double distanceKm) {
+    if (_freeDeliveryEnabled && this.subtotal >= _freeDeliveryMinAmount && distanceKm <= _freeDeliveryMaxDistance) {
+      return 0.0; // FREE 🎉
+    }
     if (distanceKm <= 1) return _deliveryCharge0_1;
     if (distanceKm <= 2) return _deliveryCharge1_2;
     if (distanceKm <= 3) return _deliveryCharge2_3;
     if (distanceKm <= 4) return _deliveryCharge3_4;
     if (distanceKm <= 5) return _deliveryCharge4_5;
-    return _deliveryCharge5Plus;
+    final extraKm = (distanceKm - 5).ceil();
+    return _deliveryCharge4_5 + (extraKm * _deliveryChargeExtraPerKm);
   }
 
   Future<void> loadSettings() async {
@@ -394,8 +558,10 @@ class CartProvider extends ChangeNotifier {
           .select(
             'platform_fee, delivery_charge_0_1, delivery_charge_1_2, '
             'delivery_charge_2_3, delivery_charge_3_4, '
-            'delivery_charge_4_5, delivery_charge_5_plus, '
-            'packaging_fee_0_99, packaging_fee_100_199, packaging_fee_200_plus',
+            'delivery_charge_4_5, delivery_charge_extra_per_km, '
+            'packaging_enabled, packaging_fee_0_99, packaging_fee_100_199, '
+            'packaging_fee_200_plus, free_delivery_enabled, free_delivery_min_amount, '
+            'free_delivery_max_distance',
           )
           .limit(1)
           .maybeSingle();
@@ -412,16 +578,23 @@ class CartProvider extends ChangeNotifier {
             (data['delivery_charge_3_4'] as num?)?.toDouble() ?? 30;
         _deliveryCharge4_5 =
             (data['delivery_charge_4_5'] as num?)?.toDouble() ?? 40;
-        _deliveryCharge5Plus =
-            (data['delivery_charge_5_plus'] as num?)?.toDouble() ?? 50;
+        // ✅ FIX: correct column name — no underscore before 'plus'
+        _deliveryChargeExtraPerKm =
+            (data['delivery_charge_extra_per_km'] as num?)?.toDouble() ?? 10;
 
-        // v3.0 — Packaging fee
+        _packagingEnabled = data['packaging_enabled'] as bool? ?? true;
+        _packagingThresholdSmall = 99;
+        _packagingThresholdMedium = 199;
         _packagingFee0_99 =
             (data['packaging_fee_0_99'] as num?)?.toDouble() ?? 2.0;
         _packagingFee100_199 =
             (data['packaging_fee_100_199'] as num?)?.toDouble() ?? 5.0;
         _packagingFee200Plus =
             (data['packaging_fee_200_plus'] as num?)?.toDouble() ?? 8.0;
+
+        _freeDeliveryEnabled = data['free_delivery_enabled'] as bool? ?? false;
+        _freeDeliveryMinAmount = (data['free_delivery_min_amount'] as num?)?.toDouble() ?? 0.0;
+        _freeDeliveryMaxDistance = (data['free_delivery_max_distance'] as num?)?.toDouble() ?? 0.0;
 
         _settingsLoaded = true;
         notifyListeners();
@@ -447,12 +620,17 @@ class CartProvider extends ChangeNotifier {
     }
   }
 
-  bool addItem(
+  CartAddResult addItem(
     MenuItemModel item,
     VendorModel vendor, {
     PortionType portionType,
     double? effectivePrice,
   }) {
+    // ✅ Single vendor check
+    if (_items.isNotEmpty && currentVendor?.id != vendor.id) {
+      return CartAddResult.vendorConflict;
+    }
+
     final price =
         effectivePrice ??
         (portionType == 'half'
@@ -465,10 +643,10 @@ class CartProvider extends ChangeNotifier {
     final isExisting = _items.containsKey(key);
 
     // ✅ Quantity limit check
-    if (totalItems >= maxTotalItems) return false;
+    if (totalItems >= maxTotalItems) return CartAddResult.limitReached;
 
     // ✅ Price limit — sirf naya item add hone pe check karo
-    if (!isExisting && (subtotal + price > maxOrderValue)) return false;
+    if (!isExisting && (subtotal + price > maxOrderValue)) return CartAddResult.limitReached;
 
     if (_items.containsKey(key)) {
       _items[key]!.quantity++;
@@ -494,7 +672,17 @@ class CartProvider extends ChangeNotifier {
     _saveCartToPrefs();
     _updateCartTimestamp();
     notifyListeners();
-    return true;
+    return CartAddResult.success;
+  }
+
+  void clearCartAndAdd(
+    MenuItemModel item,
+    VendorModel vendor, {
+    PortionType portionType,
+    double? effectivePrice,
+  }) {
+    clearCart();
+    addItem(item, vendor, portionType: portionType, effectivePrice: effectivePrice);
   }
 
   void forceAddItem(
@@ -567,6 +755,8 @@ class CartProvider extends ChangeNotifier {
     _confirmedPinDistanceKm = null;
     _selectedDeliveryAddress = null;
     _tipAmount = 0; // ✅ Reset tip on cart clear
+    _appliedDiscount = 0; // ✅ Reset cart threshold discount
+    _selectedAddons = []; // ✅ Reset addon items
     _clearCartPrefs();
     _clearCartTimestamp();
     notifyListeners();
@@ -644,6 +834,8 @@ class CartProvider extends ChangeNotifier {
     _confirmedPinDistanceKm = null;
     _selectedDeliveryAddress = null;
     _tipAmount = 0; // ✅ Reset tip on logout
+    _appliedDiscount = 0; // ✅ Reset cart threshold discount
+    _selectedAddons = []; // ✅ Reset addon items
     if (userId != null) {
       try {
         final prefs = await SharedPreferences.getInstance();

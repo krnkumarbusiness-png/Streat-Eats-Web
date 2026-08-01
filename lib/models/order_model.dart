@@ -7,8 +7,11 @@ class OrderModel {
   final double subtotal;
   final double platformFee;
   final double deliveryCharge;
+  final double customerDeliveryFee; // ✅ NEW — customer actually pays this
+  final double riderPayout; // ✅ NEW — rider actually earns this
   final double maxDeliveryDistanceKm; // ✅ NEW — farthest vendor distance
-  final int vendorCount; // ✅ NEW — kitne vendors the cart mein
+  final int
+  vendorCount; // ✅ NEW — kitne vendors the cart mein  final double maxDeliveryDistanceKm; // ✅ NEW — farthest vendor distance  final int vendorCount; // ✅ NEW — kitne vendors the cart mein
   final double total;
   final String status;
   final String address;
@@ -23,7 +26,6 @@ class OrderModel {
   final double affiliateCommissionLogged; // ✅ NEW
   final String orderType;
   final double packagingFee;
-  final String? mysteryGiftItem;
   final int tipAmount;
 
   OrderModel({
@@ -35,6 +37,8 @@ class OrderModel {
     required this.subtotal,
     required this.platformFee,
     this.deliveryCharge = 0,
+    this.customerDeliveryFee = 0, // ✅ NEW
+    this.riderPayout = 0, // ✅ NEW
     this.maxDeliveryDistanceKm = 0, // ✅ NEW
     this.vendorCount = 1, // ✅ NEW
     required this.total,
@@ -51,7 +55,6 @@ class OrderModel {
     this.affiliateCommissionLogged = 0, // ✅ NEW
     this.orderType = 'street_food',
     this.packagingFee = 0,
-    this.mysteryGiftItem,
     this.tipAmount = 0,
   });
 
@@ -77,6 +80,9 @@ class OrderModel {
       subtotal: (map['subtotal'] as num?)?.toDouble() ?? 0.0,
       platformFee: (map['platform_fee'] as num?)?.toDouble() ?? 0.0,
       deliveryCharge: (map['delivery_charge'] as num?)?.toDouble() ?? 0.0,
+      customerDeliveryFee:
+          (map['customer_delivery_fee'] as num?)?.toDouble() ?? 0.0, // ✅ NEW
+      riderPayout: (map['rider_payout'] as num?)?.toDouble() ?? 0.0, // ✅ NEW
       maxDeliveryDistanceKm:
           (map['max_delivery_distance_km'] as num?)?.toDouble() ?? 0.0, // ✅ NEW
       vendorCount: (map['vendor_count'] as num?)?.toInt() ?? 1, // ✅ NEW
@@ -98,7 +104,6 @@ class OrderModel {
           0, // ✅ NEW
       orderType: map['order_type'] as String? ?? 'street_food',
       packagingFee: (map['packaging_fee'] as num?)?.toDouble() ?? 0.0,
-      mysteryGiftItem: map['mystery_gift_item'] as String?,
       tipAmount: (map['tip_amount'] as num?)?.toInt() ?? 0,
     );
   }
@@ -113,6 +118,8 @@ class OrderModel {
       'subtotal': subtotal,
       'platform_fee': platformFee,
       'delivery_charge': deliveryCharge,
+      'customer_delivery_fee': customerDeliveryFee, // ✅ NEW
+      'rider_payout': riderPayout, // ✅ NEW
       'max_delivery_distance_km': maxDeliveryDistanceKm, // ✅ NEW
       'vendor_count': vendorCount, // ✅ NEW
       'total': total,
@@ -129,7 +136,6 @@ class OrderModel {
       'affiliate_commission_logged': affiliateCommissionLogged, // ✅ NEW
       'order_type': orderType,
       'packaging_fee': packagingFee,
-      'mystery_gift_item': mysteryGiftItem,
       'tip_amount': tipAmount,
     };
   }

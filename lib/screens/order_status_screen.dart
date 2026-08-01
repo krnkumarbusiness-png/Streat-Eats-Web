@@ -1,5 +1,4 @@
 import 'dart:async';
-import 'dart:math';
 import 'package:audioplayers/audioplayers.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
@@ -30,13 +29,13 @@ class OrderStatusScreen extends StatefulWidget {
   State<OrderStatusScreen> createState() => _OrderStatusScreenState();
 }
 
-class _OrderStatusScreenState extends State<OrderStatusScreen>
-    with TickerProviderStateMixin {
+class _OrderStatusScreenState extends State<OrderStatusScreen> {
   final _supabase = Supabase.instance.client;
   final _audioPlayer = AudioPlayer();
 
   OrderModel? _order;
-  Timer? _pollingTimer;
+  Timer? _pollingTimer; // deprecated
+  RealtimeChannel? _realtimeChannel;
   Timer? _cancelTimer;
   bool _isFirstLoad = true;
   bool _orderPlacedSoundPlayed = false;
@@ -60,10 +59,6 @@ class _OrderStatusScreenState extends State<OrderStatusScreen>
   bool _canCancel = false;
   static const _cancelWindowSeconds = 120;
 
-  // Scooter animation
-  late AnimationController _scooterController;
-  late Animation<double> _scooterAnimation;
-
   final List<Map<String, String>> _steps = [
     {
       'status': 'placed',
@@ -72,10 +67,16 @@ class _OrderStatusScreenState extends State<OrderStatusScreen>
       'icon': '📋',
     },
     {
+      'status': 'accepted',
+      'label': 'Rider Assigned',
+      'sublabel': 'Rider is heading to vendor!',
+      'icon': '🤝',
+    },
+    {
       'status': 'preparing',
-      'label': 'Preparing',
-      'sublabel': 'Vendor is preparing...',
-      'icon': '👨‍🍳',
+      'label': 'At Vendor',
+      'sublabel': 'Rider reached, food being prepared!',
+      'icon': '🏪',
     },
     {
       'status': 'picked_up',
@@ -101,27 +102,30 @@ class _OrderStatusScreenState extends State<OrderStatusScreen>
   void initState() {
     super.initState();
 
-    // Scooter bounce animation for "on_the_way"
-    _scooterController = AnimationController(
-      vsync: this,
-      duration: const Duration(milliseconds: 1200),
-    )..repeat(reverse: true);
-    _scooterAnimation = Tween<double>(begin: -3, end: 3).animate(
-      CurvedAnimation(parent: _scooterController, curve: Curves.easeInOut),
-    );
-
     _loadOrder();
-    _pollingTimer = Timer.periodic(
-      const Duration(seconds: 5),
-      (_) => _loadOrder(silent: true),
-    );
+    _realtimeChannel = Supabase.instance.client
+        .channel('order-status-${widget.orderId}')
+        .onPostgresChanges(
+          event: PostgresChangeEvent.update,
+          schema: 'public',
+          table: 'orders',
+          filter: PostgresChangeFilter(
+            type: PostgresChangeFilterType.eq,
+            column: 'id',
+            value: widget.orderId,
+          ),
+          callback: (payload) {
+            if (mounted) _loadOrder(silent: true);
+          },
+        )
+        .subscribe();
   }
 
   @override
   void dispose() {
     _pollingTimer?.cancel();
+    _realtimeChannel?.unsubscribe();
     _cancelTimer?.cancel();
-    _scooterController.dispose();
     _audioPlayer.dispose();
     super.dispose();
   }
@@ -379,26 +383,7 @@ class _OrderStatusScreenState extends State<OrderStatusScreen>
     return idx == -1 ? 0 : idx;
   }
 
-  // Scooter position on path: 0.0 = vendor, 1.0 = customer
-  double _getScooterProgress(String status) {
-    switch (status) {
-      case 'placed':
-        return 0.0;
-      case 'preparing':
-        return 0.05;
-      case 'picked_up':
-        return 0.3;
-      case 'on_the_way':
-        return 0.65;
-      case 'delivered':
-        return 1.0;
-      default:
-        return 0.0;
-    }
-  }
-
   String _getEta() => EtaHelper.getEta(distanceKm: _distanceKm);
-
   Future<void> _callRider(String? phone) async {
     if (phone == null || phone.trim().isEmpty) {
       AppSnackBar.showError(context, 'Rider number not available yet');
@@ -442,22 +427,8 @@ class _OrderStatusScreenState extends State<OrderStatusScreen>
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          // ── FAKE MAP ──────────────────────────────────────
-          _FakeMapWidget(
-            vendorLat: _vendorLat,
-            vendorLng: _vendorLng,
-            userLat: _userLat,
-            userLng: _userLng,
-            status: order.status,
-            scooterProgress: _getScooterProgress(order.status),
-            scooterAnimation: _scooterAnimation,
-            eta: _getEta(),
-            distanceKm: _distanceKm,
-            vendorArea: _vendorArea,
-            isDelivered: isDelivered,
-            isCancelled: isCancelled,
-          ),
-
+          // ── ARRIVING TIMER CARD ─────────────────────────────
+          _buildArrivingCard(order),
           Padding(
             padding: const EdgeInsets.all(16),
             child: Column(
@@ -494,12 +465,6 @@ class _OrderStatusScreenState extends State<OrderStatusScreen>
                   const SizedBox(height: 12),
                 ],
 
-                // OTP card
-                if (order.status == 'on_the_way' &&
-                    order.deliveryOtp != null) ...[
-                  _buildOtpCard(order.deliveryOtp!),
-                  const SizedBox(height: 12),
-                ],
 
                 _buildOrderSummary(order),
                 const SizedBox(height: 12),
@@ -640,6 +605,182 @@ class _OrderStatusScreenState extends State<OrderStatusScreen>
         ],
       ),
     );
+  }
+
+  // ── Arriving Timer Card ─────────────────────────────────────
+
+  Widget _buildArrivingCard(OrderModel order) {
+    final isDelivered = order.status == 'delivered';
+    final isCancelled = order.status == 'cancelled';
+    final isRejected = order.status == 'rejected';
+
+    // Delivered/cancelled/rejected hote hi ye card gayab ho jayega
+    if (isDelivered || isCancelled || isRejected) {
+      return const SizedBox.shrink();
+    }
+
+    final hasOtp = order.deliveryOtp != null && order.deliveryOtp!.isNotEmpty;
+
+    return Container(
+      margin: const EdgeInsets.fromLTRB(16, 16, 16, 0),
+      padding: const EdgeInsets.symmetric(vertical: 28, horizontal: 20),
+      width: double.infinity,
+      decoration: BoxDecoration(
+        color: const Color(0xFF2E2620),
+        borderRadius: BorderRadius.circular(24),
+        boxShadow: [
+          BoxShadow(
+            color: Colors.black.withOpacity(0.15),
+            blurRadius: 16,
+            offset: const Offset(0, 6),
+          ),
+        ],
+      ),
+      child: hasOtp
+          // ── OTP Display (replaces timer when OTP is available) ──
+          ? Column(
+              children: [
+                Text(
+                  'YOUR OTP',
+                  style: TextStyle(
+                    fontFamily: 'Poppins',
+                    fontSize: 11,
+                    fontWeight: FontWeight.w700,
+                    letterSpacing: 2,
+                    color: Colors.white.withOpacity(0.55),
+                  ),
+                ),
+                const SizedBox(height: 12),
+                Row(
+                  mainAxisAlignment: MainAxisAlignment.center,
+                  children: order.deliveryOtp!.split('').map((digit) {
+                    return Container(
+                      width: 52,
+                      height: 62,
+                      margin: const EdgeInsets.symmetric(horizontal: 5),
+                      decoration: BoxDecoration(
+                        color: Colors.white.withOpacity(0.12),
+                        borderRadius: BorderRadius.circular(14),
+                        border: Border.all(
+                          color: Colors.white.withOpacity(0.25),
+                          width: 1.5,
+                        ),
+                      ),
+                      child: Center(
+                        child: Text(
+                          digit,
+                          style: const TextStyle(
+                            fontFamily: 'Poppins',
+                            fontSize: 28,
+                            fontWeight: FontWeight.w800,
+                            color: Colors.white,
+                          ),
+                        ),
+                      ),
+                    );
+                  }).toList(),
+                ),
+                const SizedBox(height: 12),
+                Text(
+                  'Share this OTP with your rider',
+                  style: TextStyle(
+                    fontFamily: 'Poppins',
+                    fontSize: 13,
+                    fontWeight: FontWeight.w500,
+                    color: Colors.white.withOpacity(0.7),
+                  ),
+                ),
+                const SizedBox(height: 10),
+                GestureDetector(
+                  onTap: () {
+                    Clipboard.setData(ClipboardData(text: order.deliveryOtp!));
+                    AppSnackBar.showSuccess(context, 'OTP copied');
+                  },
+                  child: Container(
+                    padding: const EdgeInsets.symmetric(horizontal: 18, vertical: 7),
+                    decoration: BoxDecoration(
+                      color: Colors.white.withOpacity(0.1),
+                      borderRadius: BorderRadius.circular(10),
+                      border: Border.all(color: Colors.white.withOpacity(0.2)),
+                    ),
+                    child: Row(
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        Icon(
+                          Icons.copy_rounded,
+                          color: Colors.white.withOpacity(0.8),
+                          size: 13,
+                        ),
+                        const SizedBox(width: 6),
+                        Text(
+                          'Copy OTP',
+                          style: TextStyle(
+                            fontFamily: 'Poppins',
+                            fontSize: 11,
+                            fontWeight: FontWeight.w700,
+                            color: Colors.white.withOpacity(0.8),
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                ),
+              ],
+            )
+          // ── ETA Timer (default when OTP not yet available) ──
+          : Column(
+              children: [
+                Text(
+                  'ARRIVING IN',
+                  style: TextStyle(
+                    fontFamily: 'Poppins',
+                    fontSize: 11,
+                    fontWeight: FontWeight.w700,
+                    letterSpacing: 2,
+                    color: Colors.white.withOpacity(0.55),
+                  ),
+                ),
+                const SizedBox(height: 8),
+                Text(
+                  _getEta(),
+                  style: const TextStyle(
+                    fontFamily: 'Poppins',
+                    fontSize: 40,
+                    fontWeight: FontWeight.w800,
+                    color: Colors.white,
+                    letterSpacing: 0.5,
+                  ),
+                ),
+                const SizedBox(height: 8),
+                Text(
+                  _getStatusSubtext(order.status),
+                  style: TextStyle(
+                    fontFamily: 'Poppins',
+                    fontSize: 13,
+                    fontWeight: FontWeight.w500,
+                    color: Colors.white.withOpacity(0.7),
+                  ),
+                ),
+              ],
+            ),
+    );
+  }
+
+  String _getStatusSubtext(String status) {
+    switch (status) {
+      case 'placed':
+        return 'Order received, assigning a rider';
+      case 'accepted':
+        return 'Rider is heading to the vendor';
+      case 'preparing':
+        return 'Rider is preparing to pick up';
+      case 'picked_up':
+        return 'Rider picked up your order';
+      case 'on_the_way':
+        return 'Rider is on the way to you';
+      default:
+        return 'Processing your order';
+    }
   }
 
   // ── Rider Card ──────────────────────────────────────────────
@@ -1426,691 +1567,4 @@ class _OrderStatusScreenState extends State<OrderStatusScreen>
       ),
     );
   }
-}
-
-// ══════════════════════════════════════════════════════════════
-//  FAKE MAP WIDGET
-//  - SVG-style map using Flutter Canvas (CustomPaint)
-//  - Vendor pin (orange) + User pin (green)
-//  - Curved path between them
-//  - Rider PNG slides along path based on status progress
-//  - Haldwani-style road grid background
-// ══════════════════════════════════════════════════════════════
-
-class _FakeMapWidget extends StatelessWidget {
-  final double? vendorLat;
-  final double? vendorLng;
-  final double? userLat;
-  final double? userLng;
-  final String status;
-  final double scooterProgress; // 0.0 to 1.0
-  final Animation<double> scooterAnimation;
-  final String eta;
-  final double? distanceKm;
-  final String vendorArea;
-  final bool isDelivered;
-  final bool isCancelled;
-
-  const _FakeMapWidget({
-    required this.vendorLat,
-    required this.vendorLng,
-    required this.userLat,
-    required this.userLng,
-    required this.status,
-    required this.scooterProgress,
-    required this.scooterAnimation,
-    required this.eta,
-    required this.distanceKm,
-    required this.vendorArea,
-    required this.isDelivered,
-    required this.isCancelled,
-  });
-
-  @override
-  Widget build(BuildContext context) {
-    final w = MediaQuery.of(context).size.width;
-    const h = 220.0;
-
-    return Stack(
-      children: [
-        // Map canvas
-        SizedBox(
-          width: w,
-          height: h,
-          child: CustomPaint(
-            painter: _MapPainter(
-              vendorLat: vendorLat,
-              vendorLng: vendorLng,
-              userLat: userLat,
-              userLng: userLng,
-              status: status,
-              scooterProgress: scooterProgress,
-            ),
-          ),
-        ),
-
-        // Rider scooter PNG — animated
-        if (!isCancelled)
-          AnimatedBuilder(
-            animation: scooterAnimation,
-            builder: (_, __) {
-              final points = _computePathPoints(
-                w,
-                h,
-                vendorLat,
-                vendorLng,
-                userLat,
-                userLng,
-              );
-              final pos = _getPositionOnPath(points, scooterProgress);
-              final isMoving = status == 'on_the_way';
-
-              return Positioned(
-                left: pos.dx - 24,
-                top: pos.dy - 28 + (isMoving ? scooterAnimation.value : 0),
-                child: Container(
-                  width: 48,
-                  height: 48,
-                  decoration: BoxDecoration(
-                    color: Colors.white,
-                    shape: BoxShape.circle,
-                    boxShadow: [
-                      BoxShadow(
-                        color: AppColors.primary.withOpacity(0.3),
-                        blurRadius: 10,
-                        offset: const Offset(0, 4),
-                      ),
-                    ],
-                  ),
-                  child: ClipOval(
-                    child: Image.asset(
-                      'assets/images/rider_scooter.png',
-                      fit: BoxFit.cover,
-                      errorBuilder: (_, __, ___) => const Icon(
-                        Icons.delivery_dining_rounded,
-                        color: AppColors.primary,
-                        size: 26,
-                      ),
-                    ),
-                  ),
-                ),
-              );
-            },
-          ),
-
-        // ETA pill (top left)
-        if (!isDelivered && !isCancelled)
-          Positioned(
-            top: 14,
-            left: 14,
-            child: Container(
-              padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
-              decoration: BoxDecoration(
-                color: Colors.white,
-                borderRadius: BorderRadius.circular(20),
-                boxShadow: [
-                  BoxShadow(
-                    color: Colors.black.withOpacity(0.12),
-                    blurRadius: 10,
-                    offset: const Offset(0, 3),
-                  ),
-                ],
-              ),
-              child: Row(
-                mainAxisSize: MainAxisSize.min,
-                children: [
-                  const Icon(
-                    Icons.access_time_rounded,
-                    color: AppColors.primary,
-                    size: 14,
-                  ),
-                  const SizedBox(width: 5),
-                  Text(
-                    eta,
-                    style: const TextStyle(
-                      fontFamily: 'Poppins',
-                      fontSize: 13,
-                      fontWeight: FontWeight.w800,
-                      color: AppColors.primary,
-                    ),
-                  ),
-                  const Text(
-                    ' away',
-                    style: TextStyle(
-                      fontFamily: 'Poppins',
-                      fontSize: 12,
-                      fontWeight: FontWeight.w600,
-                      color: AppColors.textSecondary,
-                    ),
-                  ),
-                ],
-              ),
-            ),
-          ),
-
-        // Delivered pill
-        if (isDelivered)
-          Positioned(
-            top: 14,
-            left: 14,
-            child: Container(
-              padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
-              decoration: BoxDecoration(
-                color: AppColors.success,
-                borderRadius: BorderRadius.circular(20),
-                boxShadow: [
-                  BoxShadow(
-                    color: AppColors.success.withOpacity(0.4),
-                    blurRadius: 10,
-                    offset: const Offset(0, 3),
-                  ),
-                ],
-              ),
-              child: const Row(
-                mainAxisSize: MainAxisSize.min,
-                children: [
-                  Icon(
-                    Icons.check_circle_rounded,
-                    color: Colors.white,
-                    size: 14,
-                  ),
-                  SizedBox(width: 5),
-                  Text(
-                    'Delivered! 🎉',
-                    style: TextStyle(
-                      fontFamily: 'Poppins',
-                      fontSize: 12,
-                      fontWeight: FontWeight.w800,
-                      color: Colors.white,
-                    ),
-                  ),
-                ],
-              ),
-            ),
-          ),
-
-        // Distance pill (top right)
-        if (distanceKm != null)
-          Positioned(
-            top: 14,
-            right: 14,
-            child: Container(
-              padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
-              decoration: BoxDecoration(
-                color: Colors.white,
-                borderRadius: BorderRadius.circular(12),
-                boxShadow: [
-                  BoxShadow(
-                    color: Colors.black.withOpacity(0.1),
-                    blurRadius: 8,
-                    offset: const Offset(0, 2),
-                  ),
-                ],
-              ),
-              child: Text(
-                '${distanceKm!.toStringAsFixed(1)} km',
-                style: const TextStyle(
-                  fontFamily: 'Poppins',
-                  fontSize: 11,
-                  fontWeight: FontWeight.w700,
-                  color: AppColors.textPrimary,
-                ),
-              ),
-            ),
-          ),
-
-        // Live badge
-        Positioned(
-          bottom: 12,
-          right: 14,
-          child: Container(
-            padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
-            decoration: BoxDecoration(
-              color: Colors.white,
-              borderRadius: BorderRadius.circular(10),
-              boxShadow: [
-                BoxShadow(
-                  color: Colors.black.withOpacity(0.1),
-                  blurRadius: 6,
-                  offset: const Offset(0, 2),
-                ),
-              ],
-            ),
-            child: Row(
-              mainAxisSize: MainAxisSize.min,
-              children: [
-                Container(
-                  width: 6,
-                  height: 6,
-                  decoration: const BoxDecoration(
-                    color: AppColors.success,
-                    shape: BoxShape.circle,
-                  ),
-                ),
-                const SizedBox(width: 5),
-                const Text(
-                  'LIVE',
-                  style: TextStyle(
-                    fontFamily: 'Poppins',
-                    fontSize: 9,
-                    fontWeight: FontWeight.w800,
-                    color: AppColors.success,
-                    letterSpacing: 1,
-                  ),
-                ),
-              ],
-            ),
-          ),
-        ),
-      ],
-    );
-  }
-
-  // Convert lat/lng to relative SVG points inside map bounds
-  static List<Offset> _computePathPoints(
-    double w,
-    double h,
-    double? vendorLat,
-    double? vendorLng,
-    double? userLat,
-    double? userLng,
-  ) {
-    // Fallback positions if coords not available
-    final vPoint = (vendorLat != null && vendorLng != null)
-        ? const Offset(0, 0) // will be calculated below
-        : Offset(w * 0.75, h * 0.2);
-    final uPoint = (userLat != null && userLng != null)
-        ? const Offset(0, 0) // will be calculated below
-        : Offset(w * 0.25, h * 0.78);
-
-    if (vendorLat == null ||
-        vendorLng == null ||
-        userLat == null ||
-        userLng == null) {
-      return _buildCurvedPath(vPoint, uPoint, w, h);
-    }
-
-    // Map lat/lng to screen coords
-    // Use relative difference to position pins
-    final allLats = [vendorLat, userLat];
-    final allLngs = [vendorLng, userLng];
-    final minLat = allLats.reduce(min);
-    final maxLat = allLats.reduce(max);
-    final minLng = allLngs.reduce(min);
-    final maxLng = allLngs.reduce(max);
-
-    final latRange = (maxLat - minLat).abs().clamp(0.002, double.infinity);
-    final lngRange = (maxLng - minLng).abs().clamp(0.002, double.infinity);
-
-    // Padding so pins don't go to edge
-    const padX = 60.0;
-    const padY = 40.0;
-    final usableW = w - padX * 2;
-    final usableH = h - padY * 2;
-
-    // Lat increases going north (up = smaller y)
-    // Lng increases going east (right = larger x)
-    double latToY(double lat) => padY + ((maxLat - lat) / latRange) * usableH;
-    double lngToX(double lng) => padX + ((lng - minLng) / lngRange) * usableW;
-
-    final vendorPt = Offset(lngToX(vendorLng), latToY(vendorLat));
-    final userPt = Offset(lngToX(userLng), latToY(userLat));
-
-    return _buildCurvedPath(vendorPt, userPt, w, h);
-  }
-
-  // Build a realistic curved path between two points (simulates road curves)
-  static List<Offset> _buildCurvedPath(
-    Offset start,
-    Offset end,
-    double w,
-    double h,
-  ) {
-    final mid = Offset((start.dx + end.dx) / 2, (start.dy + end.dy) / 2);
-
-    // Add 2 control points for realistic road curve
-    final cp1 = Offset(
-      mid.dx + (end.dy - start.dy) * 0.25,
-      mid.dy - (end.dx - start.dx) * 0.15,
-    );
-    final cp2 = Offset(
-      mid.dx - (end.dy - start.dy) * 0.15,
-      mid.dy + (end.dx - start.dx) * 0.2,
-    );
-
-    // Generate points along bezier curve
-    final points = <Offset>[];
-    const steps = 60;
-    for (int i = 0; i <= steps; i++) {
-      final t = i / steps;
-      // Cubic bezier: start, cp1, cp2, end
-      final pt = _cubicBezier(start, cp1, cp2, end, t);
-      points.add(pt);
-    }
-    return points;
-  }
-
-  static Offset _cubicBezier(
-    Offset p0,
-    Offset p1,
-    Offset p2,
-    Offset p3,
-    double t,
-  ) {
-    final mt = 1 - t;
-    return Offset(
-      mt * mt * mt * p0.dx +
-          3 * mt * mt * t * p1.dx +
-          3 * mt * t * t * p2.dx +
-          t * t * t * p3.dx,
-      mt * mt * mt * p0.dy +
-          3 * mt * mt * t * p1.dy +
-          3 * mt * t * t * p2.dy +
-          t * t * t * p3.dy,
-    );
-  }
-
-  static Offset _getPositionOnPath(List<Offset> points, double progress) {
-    if (points.isEmpty) return const Offset(100, 100);
-    final idx = ((points.length - 1) * progress).round().clamp(
-      0,
-      points.length - 1,
-    );
-    return points[idx];
-  }
-}
-
-// ── Map Painter (CustomPainter) ─────────────────────────────────
-
-class _MapPainter extends CustomPainter {
-  final double? vendorLat;
-  final double? vendorLng;
-  final double? userLat;
-  final double? userLng;
-  final String status;
-  final double scooterProgress;
-
-  _MapPainter({
-    required this.vendorLat,
-    required this.vendorLng,
-    required this.userLat,
-    required this.userLng,
-    required this.status,
-    required this.scooterProgress,
-  });
-
-  @override
-  void paint(Canvas canvas, Size size) {
-    final w = size.width;
-    final h = size.height;
-
-    // ── Background ────────────────────────────────────────────
-    canvas.drawRect(
-      Rect.fromLTWH(0, 0, w, h),
-      Paint()..color = const Color(0xFFE8F0E8),
-    );
-
-    // ── Road Grid (Haldwani-style) ────────────────────────────
-    _drawRoadGrid(canvas, w, h);
-
-    // ── Green patches (parks/fields) ──────────────────────────
-    _drawGreenPatches(canvas, w, h);
-
-    // ── Compute pin positions ─────────────────────────────────
-    final points = _FakeMapWidget._computePathPoints(
-      w,
-      h,
-      vendorLat,
-      vendorLng,
-      userLat,
-      userLng,
-    );
-    final vendorPt = points.first;
-    final userPt = points.last;
-
-    // ── Dashed route path ─────────────────────────────────────
-    _drawDashedPath(canvas, points);
-
-    // ── Animated progress path (orange fill) ─────────────────
-    _drawProgressPath(canvas, points, scooterProgress);
-
-    // ── Vendor Pin (Orange) ───────────────────────────────────
-    _drawPin(canvas, vendorPt, const Color(0xFFFF6B35), '🏪', isVendor: true);
-
-    // ── User Pin (Green) ──────────────────────────────────────
-    _drawPin(canvas, userPt, const Color(0xFF16A34A), '📍', isVendor: false);
-  }
-
-  void _drawRoadGrid(Canvas canvas, double w, double h) {
-    final roadPaint = Paint()
-      ..color = const Color(0xFFFFFFFF)
-      ..strokeWidth = 10
-      ..strokeCap = StrokeCap.round;
-
-    final roadOutlinePaint = Paint()
-      ..color = const Color(0xFFDDE8DD)
-      ..strokeWidth = 14
-      ..strokeCap = StrokeCap.round;
-
-    // Horizontal roads
-    final hRoads = [h * 0.22, h * 0.48, h * 0.72];
-    for (final y in hRoads) {
-      canvas.drawLine(Offset(0, y), Offset(w, y), roadOutlinePaint);
-      canvas.drawLine(Offset(0, y), Offset(w, y), roadPaint);
-    }
-
-    // Vertical roads
-    final vRoads = [w * 0.2, w * 0.45, w * 0.72];
-    for (final x in vRoads) {
-      canvas.drawLine(Offset(x, 0), Offset(x, h), roadOutlinePaint);
-      canvas.drawLine(Offset(x, 0), Offset(x, h), roadPaint);
-    }
-
-    // Small side roads
-    final smallRoadPaint = Paint()
-      ..color = const Color(0xFFF5F5F5)
-      ..strokeWidth = 5;
-
-    canvas.drawLine(
-      Offset(w * 0.2, h * 0.22),
-      Offset(w * 0.45, h * 0.48),
-      smallRoadPaint,
-    );
-    canvas.drawLine(
-      Offset(w * 0.45, h * 0.48),
-      Offset(w * 0.72, h * 0.72),
-      smallRoadPaint,
-    );
-  }
-
-  void _drawGreenPatches(Canvas canvas, double w, double h) {
-    final greenPaint = Paint()
-      ..color = const Color(0xFFC8DDBA).withOpacity(0.7);
-    final buildingPaint = Paint()
-      ..color = const Color(0xFFD4C9C9).withOpacity(0.6);
-
-    // Green patches
-    _drawRoundRect(
-      canvas,
-      greenPaint,
-      Rect.fromLTWH(w * 0.05, h * 0.26, w * 0.12, h * 0.18),
-      4,
-    );
-    _drawRoundRect(
-      canvas,
-      greenPaint,
-      Rect.fromLTWH(w * 0.52, h * 0.1, w * 0.16, h * 0.1),
-      4,
-    );
-    _drawRoundRect(
-      canvas,
-      greenPaint,
-      Rect.fromLTWH(w * 0.76, h * 0.52, w * 0.18, h * 0.15),
-      4,
-    );
-
-    // Building blocks
-    _drawRoundRect(
-      canvas,
-      buildingPaint,
-      Rect.fromLTWH(w * 0.25, h * 0.12, w * 0.15, h * 0.08),
-      3,
-    );
-    _drawRoundRect(
-      canvas,
-      buildingPaint,
-      Rect.fromLTWH(w * 0.05, h * 0.54, w * 0.12, h * 0.14),
-      3,
-    );
-    _drawRoundRect(
-      canvas,
-      buildingPaint,
-      Rect.fromLTWH(w * 0.76, h * 0.26, w * 0.14, h * 0.2),
-      3,
-    );
-    _drawRoundRect(
-      canvas,
-      buildingPaint,
-      Rect.fromLTWH(w * 0.5, h * 0.54, w * 0.18, h * 0.12),
-      3,
-    );
-
-    // Water body (small)
-    final waterPaint = Paint()
-      ..color = const Color(0xFFB0D4E8).withOpacity(0.7);
-    _drawRoundRect(
-      canvas,
-      waterPaint,
-      Rect.fromLTWH(w * 0.28, h * 0.56, w * 0.14, h * 0.1),
-      6,
-    );
-  }
-
-  void _drawRoundRect(Canvas canvas, Paint paint, Rect rect, double radius) {
-    canvas.drawRRect(
-      RRect.fromRectAndRadius(rect, Radius.circular(radius)),
-      paint,
-    );
-  }
-
-  void _drawDashedPath(Canvas canvas, List<Offset> points) {
-    if (points.length < 2) return;
-
-    final dashPaint = Paint()
-      ..color = const Color(0xFFFF6B35).withOpacity(0.25)
-      ..strokeWidth = 4
-      ..strokeCap = StrokeCap.round
-      ..style = PaintingStyle.stroke;
-
-    // Draw path as series of short dashes
-    final path = Path();
-    path.moveTo(points[0].dx, points[0].dy);
-    for (int i = 1; i < points.length; i++) {
-      path.lineTo(points[i].dx, points[i].dy);
-    }
-
-    // Dashed effect
-    bool draw = true;
-    double distSoFar = 0;
-    const dashLen = 8.0;
-    const gapLen = 5.0;
-
-    for (int i = 1; i < points.length; i++) {
-      final seg = (points[i] - points[i - 1]).distance;
-      if (draw) {
-        if (distSoFar + seg < dashLen) {
-          canvas.drawLine(points[i - 1], points[i], dashPaint);
-          distSoFar += seg;
-        } else {
-          final frac = (dashLen - distSoFar) / seg;
-          final endPt = Offset(
-            points[i - 1].dx + (points[i].dx - points[i - 1].dx) * frac,
-            points[i - 1].dy + (points[i].dy - points[i - 1].dy) * frac,
-          );
-          canvas.drawLine(points[i - 1], endPt, dashPaint);
-          distSoFar = 0;
-          draw = false;
-        }
-      } else {
-        distSoFar += seg;
-        if (distSoFar >= gapLen) {
-          distSoFar = 0;
-          draw = true;
-        }
-      }
-    }
-  }
-
-  void _drawProgressPath(Canvas canvas, List<Offset> points, double progress) {
-    if (points.length < 2) return;
-    final progressPaint = Paint()
-      ..color = const Color(0xFFFF6B35)
-      ..strokeWidth = 5
-      ..strokeCap = StrokeCap.round
-      ..style = PaintingStyle.stroke;
-
-    final endIdx = ((points.length - 1) * progress).round().clamp(
-      0,
-      points.length - 1,
-    );
-    for (int i = 1; i <= endIdx; i++) {
-      canvas.drawLine(points[i - 1], points[i], progressPaint);
-    }
-  }
-
-  void _drawPin(
-    Canvas canvas,
-    Offset pos,
-    Color color,
-    String emoji, {
-    required bool isVendor,
-  }) {
-    // Pin shadow
-    final shadowPaint = Paint()
-      ..color = Colors.black.withOpacity(0.15)
-      ..maskFilter = const MaskFilter.blur(BlurStyle.normal, 4);
-    canvas.drawCircle(
-      pos + const Offset(0, 4),
-      isVendor ? 16 : 14,
-      shadowPaint,
-    );
-
-    // Pin circle
-    final circlePaint = Paint()..color = color;
-    canvas.drawCircle(pos, isVendor ? 16 : 14, circlePaint);
-
-    // White ring
-    final ringPaint = Paint()
-      ..color = Colors.white
-      ..strokeWidth = 2.5
-      ..style = PaintingStyle.stroke;
-    canvas.drawCircle(pos, isVendor ? 16 : 14, ringPaint);
-
-    // White inner dot
-    canvas.drawCircle(pos, isVendor ? 5 : 4, Paint()..color = Colors.white);
-
-    // Pin tail
-    final tailPaint = Paint()..color = color;
-    final tailPath = Path()
-      ..moveTo(pos.dx - 6, pos.dy + (isVendor ? 14 : 12))
-      ..lineTo(pos.dx + 6, pos.dy + (isVendor ? 14 : 12))
-      ..lineTo(pos.dx, pos.dy + (isVendor ? 26 : 22))
-      ..close();
-    canvas.drawPath(tailPath, tailPaint);
-
-    // Pulse ring for vendor pin
-    if (isVendor) {
-      final pulsePaint = Paint()
-        ..color = color.withOpacity(0.2)
-        ..strokeWidth = 2
-        ..style = PaintingStyle.stroke;
-      canvas.drawCircle(pos, 24, pulsePaint);
-    }
-  }
-
-  @override
-  bool shouldRepaint(_MapPainter old) =>
-      old.scooterProgress != scooterProgress ||
-      old.status != status ||
-      old.vendorLat != vendorLat;
 }

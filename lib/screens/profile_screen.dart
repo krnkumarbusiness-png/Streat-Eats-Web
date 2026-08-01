@@ -1,4 +1,6 @@
-import 'dart:io';
+import 'dart:typed_data';
+import 'package:flutter/foundation.dart' show kIsWeb;
+import 'package:path/path.dart' as p;
 import 'package:flutter/material.dart';
 import 'package:flutter_image_compress/flutter_image_compress.dart';
 import 'package:image_picker/image_picker.dart';
@@ -16,8 +18,10 @@ import '../services/storage_service.dart';
 import 'donation_screen.dart';
 import 'set_password_screen.dart';
 import 'cart_screen.dart';
-import 'creator_dashboard_screen.dart'; // ✅ NAYA
 import '../constants/app_snackbar.dart';
+import 'location_picker_screen.dart';
+import 'address_selection_screen.dart';
+import '../constants/globals.dart';
 
 class ProfileScreen extends StatefulWidget {
   const ProfileScreen({super.key});
@@ -31,6 +35,18 @@ class _ProfileScreenState extends State<ProfileScreen> {
   final _authService = AuthService();
   bool _isUploadingPhoto = false;
   bool _isDeletingAccount = false;
+
+  @override
+  void initState() {
+    super.initState();
+    CartVisibilityControl.hide();
+  }
+
+  @override
+  void dispose() {
+    CartVisibilityControl.show();
+    super.dispose();
+  }
 
   void _snack(String msg, {bool isError = false}) {
     if (!mounted) return;
@@ -56,22 +72,33 @@ class _ProfileScreenState extends State<ProfileScreen> {
       final userId = _supabase.auth.currentUser?.id;
       if (userId == null) return;
 
-      final originalFile = File(picked.path);
-      final compressedFile = await FlutterImageCompress.compressAndGetFile(
-        originalFile.path,
-        '${originalFile.parent.path}/avatar_${DateTime.now().millisecondsSinceEpoch}.jpg',
-        quality: 70,
-        minWidth: 300,
-        minHeight: 300,
-        format: CompressFormat.jpeg,
-      );
-      final fileToUpload = compressedFile != null
-          ? File(compressedFile.path)
-          : originalFile;
+      final ext = p.extension(picked.name).toLowerCase().isEmpty
+          ? '.jpg'
+          : p.extension(picked.name).toLowerCase();
+
+      Uint8List uploadBytes;
+      if (kIsWeb) {
+        uploadBytes = await picked.readAsBytes();
+      } else {
+        final originalBytes = await picked.readAsBytes();
+        try {
+          final compressed = await FlutterImageCompress.compressWithList(
+            originalBytes,
+            quality: 70,
+            minWidth: 300,
+            minHeight: 300,
+            format: CompressFormat.jpeg,
+          );
+          uploadBytes = Uint8List.fromList(compressed);
+        } catch (_) {
+          uploadBytes = originalBytes;
+        }
+      }
 
       final storageService = StorageService();
       final uploadedUrl = await storageService.uploadImage(
-        fileToUpload,
+        uploadBytes,
+        ext,
         folder: 'avatars',
       );
       if (uploadedUrl == null) throw Exception('Upload failed');
@@ -798,80 +825,6 @@ class _ProfileScreenState extends State<ProfileScreen> {
     ),
   );
 
-  // ── Creator Info Dialog ───────────────────────────────────────
-  void _showCreatorInfoDialog(BuildContext context) {
-    showDialog(
-      context: context,
-      builder: (_) => AlertDialog(
-        backgroundColor: AppColors.surface,
-        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
-        title: Row(
-          children: [
-            Container(
-              width: 36,
-              height: 36,
-              decoration: BoxDecoration(
-                color: AppColors.primary.withOpacity(0.1),
-                borderRadius: BorderRadius.circular(10),
-              ),
-              child: const Icon(
-                Icons.monetization_on_rounded,
-                color: AppColors.primary,
-                size: 20,
-              ),
-            ),
-            const SizedBox(width: 10),
-            const Expanded(
-              child: Text('Creator Program', style: AppStyles.sectionHeader),
-            ),
-          ],
-        ),
-        content: SingleChildScrollView(
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              _legalHeading('🚀 What is the Creator Program?'),
-              const SizedBox(height: 6),
-              const Text(
-                'Streat Eats Creator Program lets local influencers and food lovers earn money by promoting Streat Eats in Haldwani.',
-                style: TextStyle(
-                  fontFamily: 'Poppins',
-                  fontSize: 13,
-                  color: AppColors.textSecondary,
-                  height: 1.5,
-                ),
-              ),
-              const SizedBox(height: 16),
-              _legalHeading('💰 How much can you earn?'),
-              const SizedBox(height: 6),
-              _bulletPoint('₹15 discount for your friend on first order'),
-              _bulletPoint('₹10 commission for you on every first order'),
-              _bulletPoint('₹5 per repeat order — ongoing, unlimited!'),
-              _bulletPoint('Minimum payout ₹200 — paid weekly via UPI'),
-              const SizedBox(height: 16),
-              _infoBox(
-                '⏳ Coming very soon! We\'ll notify you when it launches.',
-              ),
-            ],
-          ),
-        ),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.pop(context),
-            child: const Text(
-              'Got it!',
-              style: TextStyle(
-                color: AppColors.primary,
-                fontWeight: FontWeight.bold,
-                fontFamily: 'Poppins',
-              ),
-            ),
-          ),
-        ],
-      ),
-    );
-  }
-
   // ── About Dialog ──────────────────────────────────────────────
   void _showAboutDialog(BuildContext context) {
     showDialog(
@@ -927,8 +880,8 @@ class _ProfileScreenState extends State<ProfileScreen> {
               ),
               _aboutRow(
                 '🕔',
-                'Open 5 PM – 9 PM',
-                'Every evening so you always have fresh food when hunger strikes.',
+                'Two Daily Shifts',
+                'Order in both morning and evening shifts — exact timings shown on the home screen.',
               ),
               _aboutRow(
                 '💯',
@@ -1873,39 +1826,19 @@ class _ProfileScreenState extends State<ProfileScreen> {
               _legalHeading('2. Delivery Hours'),
               const SizedBox(height: 6),
               _bulletPoint(
-                'Delivery is available daily from 5:00 PM to 9:00 PM (IST).',
+                'Streat Eats operates in two daily shifts — morning and evening.',
               ),
               _bulletPoint(
-                'The app becomes available for ordering at exactly 5:00 PM.',
+                'Live shift timings are shown on the Home screen and may vary by area or vendor.',
               ),
               _bulletPoint(
-                'Last order acceptance is at 8:45 PM to ensure delivery before 9:00 PM.',
+                'Orders are accepted only when at least one shift is currently active.',
               ),
               _bulletPoint(
                 'We do not deliver on app maintenance days. We will inform users via push notification.',
               ),
               const SizedBox(height: 14),
-              _legalHeading('3. Delivery Distance & Charges'),
-              const SizedBox(height: 6),
-              const Text(
-                'Delivery charges are calculated based on the distance between the vendor\'s stall and your delivery address. These charges are included in the food price — we show "Free Delivery" for transparency.',
-                style: TextStyle(
-                  fontFamily: 'Poppins',
-                  fontSize: 12,
-                  color: AppColors.textSecondary,
-                  height: 1.6,
-                ),
-              ),
-              const SizedBox(height: 8),
-              _bulletPoint('0–1 km: No extra charge (fully free).'),
-              _bulletPoint('1–2 km: ₹10 added to the food price.'),
-              _bulletPoint('2–3 km: ₹20 added to the food price.'),
-              _bulletPoint('3–4 km: ₹30 added to the food price.'),
-              _bulletPoint(
-                'Beyond 4 km: Delivery is not available. Order will not be accepted.',
-              ),
-              const SizedBox(height: 14),
-              _legalHeading('4. Estimated Delivery Time'),
+              _legalHeading('3. Estimated Delivery Time'),
               const SizedBox(height: 6),
               _bulletPoint(
                 'Estimated delivery time is shown on the vendor card and checkout screen.',
@@ -1920,7 +1853,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
                 'Streat Eats is not liable for delays caused by factors outside our control (e.g. traffic jams, bad weather).',
               ),
               const SizedBox(height: 14),
-              _legalHeading('5. Delivery OTP Confirmation'),
+              _legalHeading('4. Delivery OTP Confirmation'),
               const SizedBox(height: 6),
               const Text(
                 'To ensure secure delivery, every order uses an OTP-based confirmation system:',
@@ -1948,7 +1881,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
                 'If the rider cannot reach you, they will call on your registered number. After 2 unanswered attempts, the order may be cancelled.',
               ),
               const SizedBox(height: 14),
-              _legalHeading('6. Rider Conduct'),
+              _legalHeading('5. Rider Conduct'),
               const SizedBox(height: 6),
               _bulletPoint(
                 'All riders are verified and approved by the Streat Eats admin before they can deliver.',
@@ -1963,7 +1896,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
                 'If a rider behaves inappropriately, report immediately on Instagram @streateats.app.',
               ),
               const SizedBox(height: 14),
-              _legalHeading('7. Failed Deliveries'),
+              _legalHeading('6. Failed Deliveries'),
               const SizedBox(height: 6),
               _bulletPoint(
                 'If delivery fails due to incorrect address provided by the customer, the order will be marked as failed and no refund will be issued.',
@@ -2626,11 +2559,58 @@ class _ProfileScreenState extends State<ProfileScreen> {
                               ),
                             ),
                             GestureDetector(
-                              onTap: () => _showEditAddressDialog(
-                                context,
-                                savedAddress,
-                                savedLandmark,
-                              ),
+                              // REPLACE:
+                              onTap: () async {
+                                final result =
+                                    await Navigator.push<PickedLocationResult>(
+                                      context,
+                                      MaterialPageRoute(
+                                        builder: (_) => AddressSelectionScreen(
+                                          currentLat:
+                                              userData?['last_lat'] != null
+                                              ? (userData!['last_lat'] as num)
+                                                    .toDouble()
+                                              : null,
+                                          currentLng:
+                                              userData?['last_lng'] != null
+                                              ? (userData!['last_lng'] as num)
+                                                    .toDouble()
+                                              : null,
+                                        ),
+                                      ),
+                                    );
+                                if (result != null && mounted) {
+                                  try {
+                                    final userId =
+                                        _supabase.auth.currentUser?.id;
+                                    if (userId == null) return;
+                                    final parts = result.address.split(',');
+                                    final address = parts.first.trim();
+                                    final landmark = parts.length > 1
+                                        ? parts.sublist(1).join(',').trim()
+                                        : '';
+                                    await _supabase
+                                        .from('users')
+                                        .update({
+                                          'delivery_address': result.address,
+                                          'delivery_landmark': '',
+                                          'last_lat': result.lat,
+                                          'last_lng': result.lng,
+                                        })
+                                        .eq('id', userId);
+                                    if (mounted) {
+                                      await context
+                                          .read<UserProvider>()
+                                          .fetchUserData();
+                                      _snack('Delivery address updated! 📍');
+                                    }
+                                  } catch (e) {
+                                    if (mounted) {
+                                      _snack('Save failed.', isError: true);
+                                    }
+                                  }
+                                }
+                              },
                               child: Container(
                                 padding: const EdgeInsets.all(8),
                                 decoration: BoxDecoration(
@@ -2711,11 +2691,52 @@ class _ProfileScreenState extends State<ProfileScreen> {
                         ] else ...[
                           const SizedBox(height: 10),
                           GestureDetector(
-                            onTap: () => _showEditAddressDialog(
-                              context,
-                              savedAddress,
-                              savedLandmark,
-                            ),
+                            // REPLACE:
+                            onTap: () async {
+                              final result =
+                                  await Navigator.push<PickedLocationResult>(
+                                    context,
+                                    MaterialPageRoute(
+                                      builder: (_) => AddressSelectionScreen(
+                                        currentLat:
+                                            userData?['last_lat'] != null
+                                            ? (userData!['last_lat'] as num)
+                                                  .toDouble()
+                                            : null,
+                                        currentLng:
+                                            userData?['last_lng'] != null
+                                            ? (userData!['last_lng'] as num)
+                                                  .toDouble()
+                                            : null,
+                                      ),
+                                    ),
+                                  );
+                              if (result != null && mounted) {
+                                try {
+                                  final userId = _supabase.auth.currentUser?.id;
+                                  if (userId == null) return;
+                                  await _supabase
+                                      .from('users')
+                                      .update({
+                                        'delivery_address': result.address,
+                                        'delivery_landmark': '',
+                                        'last_lat': result.lat,
+                                        'last_lng': result.lng,
+                                      })
+                                      .eq('id', userId);
+                                  if (mounted) {
+                                    await context
+                                        .read<UserProvider>()
+                                        .fetchUserData();
+                                    _snack('Delivery address updated! 📍');
+                                  }
+                                } catch (e) {
+                                  if (mounted) {
+                                    _snack('Save failed.', isError: true);
+                                  }
+                                }
+                              }
+                            },
                             child: Container(
                               width: double.infinity,
                               padding: const EdgeInsets.all(12),
@@ -2784,18 +2805,6 @@ class _ProfileScreenState extends State<ProfileScreen> {
                           context,
                           MaterialPageRoute(
                             builder: (_) => const OrderHistoryScreen(),
-                          ),
-                        ),
-                      ),
-                      _divider(),
-                      _menuItem(
-                        icon: Icons.star_outline_rounded,
-                        label: 'Creator Program',
-                        themeColor: themeColor,
-                        onTap: () => Navigator.push(
-                          context,
-                          MaterialPageRoute(
-                            builder: (_) => const CreatorDashboardScreen(),
                           ),
                         ),
                       ),
@@ -3164,6 +3173,85 @@ class _ProfileScreenState extends State<ProfileScreen> {
     ),
   );
 
+  // REPLACE:
+  Widget _menuItemWithBadge({
+    required IconData icon,
+    required String label,
+    required VoidCallback onTap,
+    required Color themeColor,
+    required int badge,
+  }) {
+    return InkWell(
+      onTap: onTap,
+      borderRadius: BorderRadius.circular(16),
+      child: Padding(
+        padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
+        child: Row(
+          children: [
+            Stack(
+              clipBehavior: Clip.none,
+              children: [
+                Container(
+                  width: 36,
+                  height: 36,
+                  decoration: BoxDecoration(
+                    color: themeColor.withOpacity(0.08),
+                    borderRadius: BorderRadius.circular(10),
+                  ),
+                  child: Icon(icon, color: themeColor, size: 18),
+                ),
+                if (badge > 0)
+                  Positioned(
+                    top: -4,
+                    right: -4,
+                    child: Container(
+                      padding: const EdgeInsets.all(3),
+                      constraints: const BoxConstraints(
+                        minWidth: 16,
+                        minHeight: 16,
+                      ),
+                      decoration: const BoxDecoration(
+                        color: Color(0xFFDC2626),
+                        shape: BoxShape.circle,
+                      ),
+                      child: Text(
+                        badge > 9 ? '9+' : '$badge',
+                        style: const TextStyle(
+                          color: Colors.white,
+                          fontSize: 9,
+                          fontWeight: FontWeight.w800,
+                          fontFamily: 'Poppins',
+                        ),
+                        textAlign: TextAlign.center,
+                      ),
+                    ),
+                  ),
+              ],
+            ),
+            const SizedBox(width: 14),
+            Expanded(
+              child: Text(
+                label,
+                style: const TextStyle(
+                  fontFamily: 'Poppins',
+                  fontSize: 14,
+                  fontWeight: FontWeight.w500,
+                  color: AppColors.textPrimary,
+                ),
+              ),
+            ),
+            const Icon(
+              Icons.chevron_right_rounded,
+              color: AppColors.textMuted,
+              size: 20,
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  // REPLACE:
   Widget _aboutRow(String emoji, String title, String desc) => Padding(
     padding: const EdgeInsets.only(bottom: 12),
     child: Row(
@@ -3198,83 +3286,6 @@ class _ProfileScreenState extends State<ProfileScreen> {
           ),
         ),
       ],
-    ),
-  );
-}
-
-Widget _menuItemWithBadge({
-  required IconData icon,
-  required String label,
-  required VoidCallback onTap,
-  required Color themeColor,
-  required int badge,
-}) {
-  return InkWell(
-    onTap: onTap,
-    borderRadius: BorderRadius.circular(16),
-    child: Padding(
-      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
-      child: Row(
-        children: [
-          Stack(
-            clipBehavior: Clip.none,
-            children: [
-              Container(
-                width: 36,
-                height: 36,
-                decoration: BoxDecoration(
-                  color: themeColor.withOpacity(0.08),
-                  borderRadius: BorderRadius.circular(10),
-                ),
-                child: Icon(icon, color: themeColor, size: 18),
-              ),
-              if (badge > 0)
-                Positioned(
-                  top: -4,
-                  right: -4,
-                  child: Container(
-                    padding: const EdgeInsets.all(3),
-                    constraints: const BoxConstraints(
-                      minWidth: 16,
-                      minHeight: 16,
-                    ),
-                    decoration: const BoxDecoration(
-                      color: Color(0xFFDC2626),
-                      shape: BoxShape.circle,
-                    ),
-                    child: Text(
-                      badge > 9 ? '9+' : '$badge',
-                      style: const TextStyle(
-                        color: Colors.white,
-                        fontSize: 9,
-                        fontWeight: FontWeight.w800,
-                        fontFamily: 'Poppins',
-                      ),
-                      textAlign: TextAlign.center,
-                    ),
-                  ),
-                ),
-            ],
-          ),
-          const SizedBox(width: 14),
-          Expanded(
-            child: Text(
-              label,
-              style: const TextStyle(
-                fontFamily: 'Poppins',
-                fontSize: 14,
-                fontWeight: FontWeight.w500,
-                color: AppColors.textPrimary,
-              ),
-            ),
-          ),
-          const Icon(
-            Icons.chevron_right_rounded,
-            color: AppColors.textMuted,
-            size: 20,
-          ),
-        ],
-      ),
     ),
   );
 }

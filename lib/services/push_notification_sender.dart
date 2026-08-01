@@ -42,6 +42,10 @@ class PushNotificationSender {
         'Order Placed! ✅',
         'Your order #$shortId has been placed successfully.',
       ),
+      'accepted': (
+        'Rider Assigned! 🤝',
+        'A rider is heading to $vendorName to pick up your order.',
+      ),
       'preparing': (
         'Being Prepared 👨‍🍳',
         'Your order from $vendorName is being freshly prepared!',
@@ -169,6 +173,33 @@ class PushNotificationSender {
         'delivery_charge': deliveryCharge.toStringAsFixed(0),
       },
     );
+  }
+
+  // Direct FCM token se rider ko notify karo — riders.id bypass
+  static Future<void> newOrderToRiderDirect({
+    required String fcmToken,
+    required String orderShortId,
+    required double amount,
+    required String vendorName,
+    double deliveryCharge = 15.0,
+  }) async {
+    try {
+      await _supabase.functions.invoke(
+        'send-notification',
+        body: {
+          'token': fcmToken,
+          'title': '🛵 New Order Available!',
+          'body':
+              '#$orderShortId — $vendorName — ₹${amount.toStringAsFixed(0)} | Earn ₹${deliveryCharge.toStringAsFixed(0)}',
+          'data': {
+            'type': 'new_order_available',
+            'order_short_id': orderShortId,
+            'delivery_charge': deliveryCharge.toStringAsFixed(0),
+          },
+        },
+        headers: _authHeaders(),
+      );
+    } catch (_) {}
   }
 
   // ✅ NEW — Rider ne reject kiya → Customer ko notify karo

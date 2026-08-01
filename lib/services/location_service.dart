@@ -1,3 +1,4 @@
+import 'package:flutter/foundation.dart' show kIsWeb;
 import 'package:flutter/material.dart';
 import 'package:geolocator/geolocator.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
@@ -145,12 +146,22 @@ class LocationService {
   bool isDeliverable(double distanceKm) => true;
 
   // ── Settings screen pe location open karo ───────────────────
+  // NOTE: Not supported on web — no-op with debug log
   Future<void> openLocationSettings() async {
+    if (kIsWeb) {
+      debugPrint('LocationService: openLocationSettings() not supported on web');
+      return;
+    }
     await Geolocator.openLocationSettings();
   }
 
   // ── App settings pe jaao (permanently denied ke liye) ───────
+  // NOTE: Not supported on web — no-op with debug log
   Future<void> openAppSettings() async {
+    if (kIsWeb) {
+      debugPrint('LocationService: openAppSettings() not supported on web');
+      return;
+    }
     await Geolocator.openAppSettings();
   }
 
