@@ -14,6 +14,7 @@ import 'package:cached_network_image/cached_network_image.dart';
 import 'package:provider/provider.dart';
 import 'package:shimmer/shimmer.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 import '../providers/cart_provider.dart';
 import '../providers/user_provider.dart';
 import '../providers/veg_filter_provider.dart';
@@ -611,6 +612,35 @@ class _HomeTabState extends State<_HomeTab> with WidgetsBindingObserver {
     _startTimingTimer();
     _checkLocationAndMaybeShowSheet();
     _scheduleLoginPrompt();
+    _checkPendingRazorpay();
+  }
+
+  Future<void> _checkPendingRazorpay() async {
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      final rzpOrderId = prefs.getString('pending_rzp_order_id');
+      if (rzpOrderId == null || rzpOrderId.isEmpty) return;
+
+      for (int i = 0; i < 5; i++) {
+        final data = await _supabase
+            .from('orders')
+            .select('payment_status')
+            .eq('razorpay_order_id', rzpOrderId)
+            .limit(1)
+            .maybeSingle();
+
+        if (data != null && data['payment_status'] == 'paid') {
+          if (mounted) {
+            context.read<CartProvider>().clearCart();
+            AppSnackBar.showSuccess(context, 'Payment successful! Your order has been placed.');
+          }
+          await prefs.remove('pending_rzp_order_id');
+          return;
+        }
+        await Future.delayed(const Duration(seconds: 2));
+      }
+      await prefs.remove('pending_rzp_order_id');
+    } catch (_) {}
   }
 
   Future<void> _loadAvatar() async {

@@ -18,13 +18,10 @@ class StorageService {
 
   static String get _endpoint => 'https://$_accountId.r2.cloudflarestorage.com';
 
-  Future<String?> uploadImage(File file, {String? folder}) async {
+  Future<String?> uploadImage(Uint8List fileBytes, String ext, {String? folder}) async {
     try {
-      final ext = path.extension(file.path);
       final fileName = '${const Uuid().v4()}$ext';
       final objectKey = folder != null ? '$folder/$fileName' : fileName;
-
-      final fileBytes = await file.readAsBytes();
       final contentType = _getContentType(ext);
 
       final headers = await _buildHeaders(

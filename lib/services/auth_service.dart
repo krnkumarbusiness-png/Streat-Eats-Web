@@ -33,6 +33,7 @@ class AuthService {
 
   // ── Google Sign In ─────────────────────────────────────────────
   GoogleSignIn get _googleSignIn => GoogleSignIn(
+    clientId: dotenv.env['GOOGLE_WEB_CLIENT_ID'],
     serverClientId: dotenv.env['GOOGLE_WEB_CLIENT_ID'],
     scopes: ['email', 'profile'],
   );
