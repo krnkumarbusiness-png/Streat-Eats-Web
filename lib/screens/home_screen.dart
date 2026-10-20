@@ -8,13 +8,13 @@
 // ✅ Everything else IDENTICAL to v22.0 — no logic/function changes
 import 'dart:ui';
 import 'dart:async';
+import 'dart:math';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:cached_network_image/cached_network_image.dart';
 import 'package:provider/provider.dart';
 import 'package:shimmer/shimmer.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
-import 'package:shared_preferences/shared_preferences.dart';
 import '../providers/cart_provider.dart';
 import '../providers/user_provider.dart';
 import '../providers/veg_filter_provider.dart';
@@ -34,9 +34,13 @@ import 'menu_item_detail_screen.dart';
 import 'search_screen.dart';
 import 'package:geocoding/geocoding.dart';
 import 'sweets_screen.dart'; // naya screen
+import 'meals_screen.dart'; // ✅ NEW: Curated Meals Screen
 import '../models/combo_model.dart';
 import '../services/combo_service.dart';
 import '../services/offer_service.dart';
+import 'package:shared_preferences/shared_preferences.dart';
+import 'all_offers_screen.dart';
+import 'all_festive_deals_screen.dart';
 import 'combos_list_screen.dart';
 import 'combo_detail_screen.dart';
 import 'order_status_screen.dart';
@@ -50,6 +54,7 @@ import '../widgets/explore_item_card.dart';
 import 'all_recommended_screen.dart';
 import '../utils/cart_utils.dart';
 import '../constants/app_snackbar.dart';
+import '../widgets/global_floating_cart.dart';
 
 // ─── Local Colors ─────────────────────────────────────────
 class _LC {
@@ -166,6 +171,11 @@ class _HomeCache {
   static List<_BannerData>? banners;
   static List<Map<String, dynamic>>? categories;
   static List<MenuItemModel>? recommendedItems;
+  static List<MenuItemModel>? todaysDeals; // ✅ NEW
+  static List<MenuItemModel>? trendingItems; // ✅ NEW
+  static String? liveOrdersText; // ✅ NEW
+  static int liveOrdersCount = 240; // ✅ NEW
+  static bool isLiveOrdersEnabled = true; // ✅ NEW
   static List<VendorModel>? allVendors;
   static List<VendorModel>? recommendedRestaurants;
   static bool? isAppActive;
@@ -182,6 +192,17 @@ class _HomeCache {
   static Map<String, List<MenuItemModel>>? menuItemsByCategory; // ✅ NEW
   static List<String>? exploreMenuCategories;
 
+  // ✅ Real-time Growth & Promotional Cache
+  static String flashRushTitle = '⚡ Evening Street Crave: Flat 40% OFF';
+  static bool isFlashSaleLive = true;
+  static int flashSaleMinutes = 45;
+  static bool spinWheelEnabled = true;
+  static bool spinRequire24hOrder = true;
+  static bool spinLock24hEnabled = true;
+  static List<Map<String, dynamic>>? dynamicSpinSlices;
+  static bool fomoEnabled = true;
+  static int fomoIntervalSeconds = 26;
+
   static bool get isStale {
     if (lastFetched == null) return true;
     return DateTime.now().difference(lastFetched!) >
@@ -192,6 +213,8 @@ class _HomeCache {
     banners = null;
     categories = null;
     recommendedItems = null;
+    todaysDeals = null;
+    trendingItems = null;
     allVendors = null;
     recommendedRestaurants = null;
     isAppActive = null;
@@ -201,6 +224,7 @@ class _HomeCache {
     homeOffers = null;
     menuItemsByCategory = null; // ✅ NEW
     exploreMenuCategories = null;
+    dynamicSpinSlices = null;
   }
 }
 
@@ -224,36 +248,23 @@ class _HomeScreenState extends State<HomeScreen> {
   @override
   void initState() {
     super.initState();
-    // Fail-safe to ensure cart is always visible when returning to a fresh home screen
-    CartVisibilityControl.hideCount.value = 0;
-    
     _pages = [
       _HomeTab(onSwitchTab: _switchTab, onNavVisibilityChanged: (_) {}),
       StreetFoodScreen(selectedCategoryNotifier: _streetFoodCatNotifier),
       const SweetsScreen(),
+      const MealsScreen(),
       const OrderHistoryScreen(),
-      const CartScreen(),
     ];
   }
 
   @override
   void dispose() {
-    if (_tab == 4) {
-      CartVisibilityControl.show();
-    }
     _streetFoodCatNotifier.dispose();
     super.dispose();
   }
 
   void _switchTab(int i) {
     if (_tab == i) return;
-
-    if (i == 4 && _tab != 4) {
-      CartVisibilityControl.hide();
-    } else if (i != 4 && _tab == 4) {
-      CartVisibilityControl.show();
-    }
-
     setState(() => _tab = i);
   }
 
@@ -273,7 +284,13 @@ class _HomeScreenState extends State<HomeScreen> {
       },
       child: Scaffold(
         backgroundColor: _LC.background,
-        body: IndexedStack(index: _tab, children: _pages),
+        body: Stack(
+          children: [
+            IndexedStack(index: _tab, children: _pages),
+            if (_tab == 0 || _tab == 1 || _tab == 2 || _tab == 3)
+              const GlobalFloatingCart(bottomOffset: 12),
+          ],
+        ),
         bottomNavigationBar: _BottomNav(
           current: _tab,
           onTap: _switchTab,
@@ -302,19 +319,19 @@ class _BottomNav extends StatelessWidget {
         filter: ImageFilter.blur(sigmaX: 20, sigmaY: 20),
         child: Container(
           decoration: BoxDecoration(
-            color: Colors.white.withOpacity(0.92),
+            color: Colors.white.withValues(alpha: 0.92),
             border: Border(
-              top: BorderSide(color: _LC.border.withOpacity(0.6), width: 0.5),
+              top: BorderSide(color: _LC.border.withValues(alpha: 0.6), width: 0.5),
             ),
             boxShadow: [
               BoxShadow(
-                color: Colors.black.withOpacity(0.10),
+                color: Colors.black.withValues(alpha: 0.10),
                 blurRadius: 30,
                 spreadRadius: 0,
                 offset: const Offset(0, -8),
               ),
               BoxShadow(
-                color: _LC.accent.withOpacity(0.04),
+                color: _LC.accent.withValues(alpha: 0.04),
                 blurRadius: 20,
                 offset: const Offset(0, -4),
               ),
@@ -351,10 +368,18 @@ class _BottomNav extends StatelessWidget {
                     onTap: onTap,
                   ),
                   _NavItem(
+                    icon: Icons.lunch_dining_outlined,
+                    activeIcon: Icons.lunch_dining_rounded,
+                    label: 'Meals',
+                    idx: 3,
+                    current: current,
+                    onTap: onTap,
+                  ),
+                  _NavItem(
                     icon: Icons.receipt_long_outlined,
                     activeIcon: Icons.receipt_long_rounded,
                     label: 'Orders',
-                    idx: 3,
+                    idx: 4,
                     current: current,
                     onTap: onTap,
                   ),
@@ -582,7 +607,7 @@ class _HomeTabState extends State<_HomeTab> with WidgetsBindingObserver {
   final bool _loginPromptShown = false;
   bool _loginPromptStopped =
       false; // ✅ NEW — login screen pe gaya to dobara popup na aaye
-  Map<String, List<MenuItemModel>> _menuItemsGrouped = {};
+  final Map<String, List<MenuItemModel>> _menuItemsGrouped = {};
   Map<String, List<MenuItemModel>> _menuItemsByCategory = {};
   List<String> _exploreMenuCategories = [];
   String? _avatarUrl;
@@ -591,6 +616,74 @@ class _HomeTabState extends State<_HomeTab> with WidgetsBindingObserver {
   bool _loadingCombos = true;
   List<Map<String, dynamic>> _homeOffers = [];
   bool _loadingOffers = true;
+  List<MenuItemModel> _todaysDeals = []; // ✅ NEW
+  bool _loadingDeals = true; // ✅ NEW
+  List<MenuItemModel> _trendingItems = []; // ✅ NEW
+  bool _loadingTrending = true; // ✅ NEW
+  String _liveOrdersText = ''; // ✅ NEW
+  int _liveOrdersCount = 240; // ✅ NEW
+  bool _isLiveOrdersEnabled = true; // ✅ NEW
+
+  // ── Growth & Order Revival Engine State ──
+  bool _hasOrderedIn24h = false;
+  bool _spinEligibleLoading = true;
+  bool _isFlashSaleLive = true;
+  String _flashRushTitle = '⚡ Evening Street Crave: Flat 40% OFF';
+  int _flashSaleMinutes = 45;
+  int _flashSaleSeconds = 18;
+  Timer? _flashTimer;
+  Timer? _fomoTimer;
+  bool _showFomoToast = false;
+  int _fomoIndex = 0;
+  bool _fomoEnabled = true;
+  int _fomoIntervalSeconds = 26;
+  bool _isDialogOpen = false;
+
+  // ── 24-Hour Spin & Win Lock State ─────────────────────────────
+  Timer? _spinCountdownTicker;
+  bool _isSpinLocked24h = false;
+  bool _spinLock24hEnabled = true;
+  Duration _spinTimeRemaining = Duration.zero;
+  String _spinCountdownText = '';
+  String? _lastWonSpinCode;
+  String? _lastWonSpinTitle;
+  bool _spinWheelEnabled = true;
+  bool _spinRequire24hOrder = true;
+  List<Map<String, dynamic>> _dynamicSpinSlices = [];
+
+  // ── Realtime & Flash Deal State ──────────────────────────────
+  RealtimeChannel? _growthChannel;
+  RealtimeChannel? _settingsChannel;
+  RealtimeChannel? _festiveDealsChannel;
+  List<MenuItemModel> _flashDeals = [];
+
+  final List<Map<String, String>> _fomoToasts = [
+    {
+      'name': 'Rohit from Subhash Nagar',
+      'item': 'just ordered Momos Combo 🥟',
+      'time': 'Just now',
+    },
+    {
+      'name': 'Priya from Mukhani',
+      'item': 'saved ₹40 on Chole Bhature 🍛',
+      'time': '2 mins ago',
+    },
+    {
+      'name': 'Aman from Bareilly Road',
+      'item': 'unlocked FREE Delivery 🛵',
+      'time': '3 mins ago',
+    },
+    {
+      'name': 'Vikram from Tikonia',
+      'item': 'grabbed Flash Deal: Paneer Burger 🍔',
+      'time': '5 mins ago',
+    },
+    {
+      'name': 'Sneha from Nawabi Road',
+      'item': 'ordered Roll & Cold Coffee 🥤',
+      'time': '7 mins ago',
+    },
+  ];
 
   static const double _bannerH = 200.0;
   static const double _locationH = 52.0;
@@ -612,6 +705,13 @@ class _HomeTabState extends State<_HomeTab> with WidgetsBindingObserver {
     _startTimingTimer();
     _checkLocationAndMaybeShowSheet();
     _scheduleLoginPrompt();
+    _check24hOrderStatus();
+    _checkSpin24hStatus();
+    _loadGrowthSettings();
+    _loadFlashDeals();
+    _startFlashSaleTimer();
+    _startFomoTimer();
+    _setupRealtimeSubscriptions();
     _checkPendingRazorpay();
   }
 
@@ -632,7 +732,8 @@ class _HomeTabState extends State<_HomeTab> with WidgetsBindingObserver {
         if (data != null && data['payment_status'] == 'paid') {
           if (mounted) {
             context.read<CartProvider>().clearCart();
-            AppSnackBar.showSuccess(context, 'Payment successful! Your order has been placed.');
+            AppSnackBar.showSuccess(
+                context, 'Payment successful! Your order has been placed.');
           }
           await prefs.remove('pending_rzp_order_id');
           return;
@@ -666,8 +767,16 @@ class _HomeTabState extends State<_HomeTab> with WidgetsBindingObserver {
     _bannerTimer?.cancel();
     _timingTimer?.cancel();
     _loginPromptTimer?.cancel();
+    _flashTimer?.cancel();
+    _fomoTimer?.cancel();
+    _spinCountdownTicker?.cancel();
     _activePageNotifier.dispose();
     _bannerCtrl.dispose();
+    try {
+      _growthChannel?.unsubscribe();
+      _settingsChannel?.unsubscribe();
+      _festiveDealsChannel?.unsubscribe();
+    } catch (_) {}
     super.dispose();
   }
 
@@ -675,6 +784,16 @@ class _HomeTabState extends State<_HomeTab> with WidgetsBindingObserver {
   void didChangeAppLifecycleState(AppLifecycleState state) {
     if (state == AppLifecycleState.resumed) {
       _checkLocationPermission();
+      // ✅ When user returns from Admin App or background, refresh all dynamic configs instantly!
+      _loadGrowthSettings();
+      _loadFlashDeals();
+      _loadLiveOrdersSettings();
+      _loadTiming();
+      _checkSpin24hStatus();
+      _check24hOrderStatus();
+      if (mounted) {
+        context.read<CartProvider>().reloadSettings();
+      }
     }
   }
 
@@ -880,7 +999,7 @@ class _HomeTabState extends State<_HomeTab> with WidgetsBindingObserver {
     showDialog(
       context: context,
       barrierDismissible: true,
-      barrierColor: Colors.black.withOpacity(0.55),
+      barrierColor: Colors.black.withValues(alpha: 0.55),
       builder: (_) => _LoginPromptDialog(
         onLoginTap: () {
           // ✅ NEW — login button dabate hi future reminders band
@@ -914,6 +1033,9 @@ class _HomeTabState extends State<_HomeTab> with WidgetsBindingObserver {
       _loadBanners(),
       _loadCategories(),
       _loadRecommended(),
+      _loadTodaysDeals(), // ✅ NEW
+      _loadTrendingItems(), // ✅ NEW
+      _loadLiveOrdersSettings(), // ✅ NEW
       _loadVendors(),
       _loadRecommendedRestaurants(),
       _loadTiming(),
@@ -921,6 +1043,8 @@ class _HomeTabState extends State<_HomeTab> with WidgetsBindingObserver {
       _loadUserArea(),
       _loadHomeCombos(),
       _loadHomeOffers(),
+      _loadGrowthSettings(), // ✅ Always fetch real-time growth configs
+      _loadFlashDeals(),     // ✅ Always fetch real-time flash deals
     ]);
     _HomeCache.lastFetched = DateTime.now();
     _applyCache(); // Apply all fetched data to state simultaneously
@@ -977,6 +1101,13 @@ class _HomeTabState extends State<_HomeTab> with WidgetsBindingObserver {
       _loadingCats = false;
       _recommendedItems = _HomeCache.recommendedItems ?? [];
       _loadingRec = false;
+      _todaysDeals = _HomeCache.todaysDeals ?? []; // ✅ NEW
+      _loadingDeals = false; // ✅ NEW
+      _trendingItems = _HomeCache.trendingItems ?? []; // ✅ NEW
+      _loadingTrending = false; // ✅ NEW
+      _liveOrdersText = _HomeCache.liveOrdersText ?? ''; // ✅ NEW
+      _liveOrdersCount = _HomeCache.liveOrdersCount; // ✅ NEW
+      _isLiveOrdersEnabled = _HomeCache.isLiveOrdersEnabled; // ✅ NEW
       _allVendors = _HomeCache.allVendors ?? [];
       _recommendedRestaurants = _HomeCache.recommendedRestaurants ?? [];
       _loadingRecRest = false;
@@ -990,6 +1121,17 @@ class _HomeTabState extends State<_HomeTab> with WidgetsBindingObserver {
       _loadingOffers = false;
       _menuItemsByCategory = _HomeCache.menuItemsByCategory ?? {}; // ✅ NEW
       _exploreMenuCategories = _HomeCache.exploreMenuCategories ?? [];
+      _isFlashSaleLive = _HomeCache.isFlashSaleLive;
+      _flashRushTitle = _HomeCache.flashRushTitle;
+      _flashSaleMinutes = _HomeCache.flashSaleMinutes;
+      _spinWheelEnabled = _HomeCache.spinWheelEnabled;
+      _spinRequire24hOrder = _HomeCache.spinRequire24hOrder;
+      _spinLock24hEnabled = _HomeCache.spinLock24hEnabled;
+      if (_HomeCache.dynamicSpinSlices != null) {
+        _dynamicSpinSlices = _HomeCache.dynamicSpinSlices!;
+      }
+      _fomoEnabled = _HomeCache.fomoEnabled;
+      _fomoIntervalSeconds = _HomeCache.fomoIntervalSeconds;
     });
     _startAutoplay();
     _checkAndShowPopup();
@@ -1097,6 +1239,52 @@ class _HomeTabState extends State<_HomeTab> with WidgetsBindingObserver {
     } catch (_) {
       _HomeCache.recommendedItems = [];
     }
+  }
+
+  // ✅ NEW: Today's Best Deals loader (Admin controlled via DB)
+  Future<void> _loadTodaysDeals() async {
+    try {
+      final items = await MenuService().getTodaysDeals();
+      _HomeCache.todaysDeals = items;
+    } catch (_) {
+      _HomeCache.todaysDeals = [];
+    }
+  }
+
+  // ✅ NEW: Trending Items loader (Admin controlled via DB)
+  Future<void> _loadTrendingItems() async {
+    try {
+      final items = await MenuService().getTrendingItems();
+      _HomeCache.trendingItems = items;
+    } catch (_) {
+      _HomeCache.trendingItems = [];
+    }
+  }
+
+  // ✅ NEW: Live Order Counter settings loader from app_settings (Admin controlled)
+  Future<void> _loadLiveOrdersSettings() async {
+    try {
+      final data = await _supabase
+          .from('app_settings')
+          .select('live_orders_text, is_live_orders_enabled, live_orders_count')
+          .limit(1)
+          .maybeSingle();
+
+      if (data != null) {
+        final text = data['live_orders_text'] as String?;
+        final enabled = data['is_live_orders_enabled'] as bool?;
+        final count = (data['live_orders_count'] as num?)?.toInt();
+        if (text != null && text.trim().isNotEmpty) {
+          _HomeCache.liveOrdersText = text.trim();
+        }
+        if (enabled != null) {
+          _HomeCache.isLiveOrdersEnabled = enabled;
+        }
+        if (count != null && count > 0) {
+          _HomeCache.liveOrdersCount = count;
+        }
+      }
+    } catch (_) {}
   }
 
   Future<void> _loadVendors() async {
@@ -1362,15 +1550,426 @@ class _HomeTabState extends State<_HomeTab> with WidgetsBindingObserver {
   }
 
   Future<void> _checkAndShowPopup() async {
-    // Popup removed
+    if (!mounted || _popupShown) return;
+    try {
+      final data = await _supabase
+          .from('app_settings')
+          .select(
+            'is_popup_enabled, popup_enabled, popup_title, popup_subtitle, '
+            'popup_image_url, popup_button_text, popup_action_route, '
+            'popup_max_per_day, popup_interval_minutes, popup_target_screen',
+          )
+          .limit(1)
+          .maybeSingle();
+
+      if (data == null) return;
+
+      final bool isEnabled = (data['is_popup_enabled'] as bool?) ??
+          (data['popup_enabled'] as bool?) ??
+          false;
+      if (!isEnabled) return;
+
+      final String title =
+          (data['popup_title'] as String?)?.trim() ?? 'Special Announcement 🎉';
+      final String subtitle = (data['popup_subtitle'] as String?)?.trim() ??
+          'Check out today\'s hottest food & offers on Streat Eats!';
+      final String? imageUrl = (data['popup_image_url'] as String?)?.trim();
+      final String buttonText =
+          (data['popup_button_text'] as String?)?.trim() ?? 'Explore Now';
+      final String actionRoute =
+          (data['popup_action_route'] as String?)?.trim() ??
+          (data['popup_target_screen'] as String?)?.trim() ??
+          'street_food';
+      final int maxPerDay = (data['popup_max_per_day'] as num?)?.toInt() ?? 2;
+      final int minIntervalMins =
+          (data['popup_interval_minutes'] as num?)?.toInt() ?? 60;
+
+      final prefs = await SharedPreferences.getInstance();
+      final now = DateTime.now();
+      final todayStr =
+          '${now.year}-${now.month.toString().padLeft(2, '0')}-${now.day.toString().padLeft(2, '0')}';
+
+      final storedDate = prefs.getString('home_popup_date') ?? '';
+      int countToday = prefs.getInt('home_popup_count') ?? 0;
+      final lastShownEpoch = prefs.getInt('home_popup_last_shown_time') ?? 0;
+
+      if (storedDate != todayStr) {
+        countToday = 0;
+      }
+
+      if (countToday >= maxPerDay) {
+        return;
+      }
+
+      final lastShownTime =
+          DateTime.fromMillisecondsSinceEpoch(lastShownEpoch);
+      final diffMins = now.difference(lastShownTime).inMinutes;
+      if (lastShownEpoch > 0 && diffMins < minIntervalMins) {
+        return;
+      }
+
+      _popupShown = true;
+      await prefs.setString('home_popup_date', todayStr);
+      await prefs.setInt('home_popup_count', countToday + 1);
+      await prefs.setInt(
+        'home_popup_last_shown_time',
+        now.millisecondsSinceEpoch,
+      );
+
+      if (!mounted) return;
+      await Future.delayed(const Duration(milliseconds: 700));
+      if (!mounted) return;
+
+      _showSlideUpPopup(
+        title: title,
+        subtitle: subtitle,
+        imageUrl: imageUrl,
+        buttonText: buttonText,
+        actionRoute: actionRoute,
+      );
+    } catch (e) {
+      debugPrint('Popup check error: $e');
+    }
   }
 
-  void _showBannerPopup({
+  void _showSlideUpPopup({
     required String title,
     required String subtitle,
+    String? imageUrl,
     required String buttonText,
+    required String actionRoute,
   }) {
-    // Popup removed
+    HapticFeedback.mediumImpact();
+    showGeneralDialog(
+      context: context,
+      barrierDismissible: true,
+      barrierLabel: 'HomePromoPopup',
+      barrierColor: Colors.black.withValues(alpha: 0.55),
+      transitionDuration: const Duration(milliseconds: 380),
+      pageBuilder: (ctx, anim1, anim2) {
+        return Center(
+          child: Material(
+            color: Colors.transparent,
+            child: Container(
+              width: MediaQuery.of(ctx).size.width * 0.88,
+              constraints: const BoxConstraints(maxWidth: 380),
+              margin: const EdgeInsets.symmetric(horizontal: 20),
+              decoration: BoxDecoration(
+                color: _LC.surface,
+                borderRadius: BorderRadius.circular(26),
+                boxShadow: [
+                  BoxShadow(
+                    color: Colors.black.withValues(alpha: 0.18),
+                    blurRadius: 24,
+                    offset: const Offset(0, 8),
+                  ),
+                ],
+              ),
+              child: ClipRRect(
+                borderRadius: BorderRadius.circular(26),
+                child: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  crossAxisAlignment: CrossAxisAlignment.stretch,
+                  children: [
+                    // Top Image or Decorative Header
+                    Stack(
+                      children: [
+                        if (imageUrl != null && imageUrl.isNotEmpty)
+                          SizedBox(
+                            height: 160,
+                            width: double.infinity,
+                            child: CachedNetworkImage(
+                              imageUrl: imageUrl,
+                              fit: BoxFit.cover,
+                              placeholder: (_, __) => Container(
+                                color: _LC.accentLight,
+                                child: const Center(
+                                  child: CircularProgressIndicator(
+                                    strokeWidth: 2,
+                                    color: _LC.accent,
+                                  ),
+                                ),
+                              ),
+                              errorWidget: (_, __, ___) => _defaultPopupBanner(),
+                            ),
+                          )
+                        else
+                          _defaultPopupBanner(),
+
+                        // Close Button (Top Right)
+                        Positioned(
+                          top: 10,
+                          right: 10,
+                          child: InkWell(
+                            onTap: () {
+                              HapticFeedback.lightImpact();
+                              Navigator.pop(ctx);
+                            },
+                            borderRadius: BorderRadius.circular(20),
+                            child: Container(
+                              padding: const EdgeInsets.all(6),
+                              decoration: BoxDecoration(
+                                color: Colors.black.withValues(alpha: 0.5),
+                                shape: BoxShape.circle,
+                              ),
+                              child: const Icon(
+                                Icons.close_rounded,
+                                color: Colors.white,
+                                size: 18,
+                              ),
+                            ),
+                          ),
+                        ),
+
+                        // Special Offer Badge
+                        Positioned(
+                          bottom: 10,
+                          left: 14,
+                          child: Container(
+                            padding: const EdgeInsets.symmetric(
+                              horizontal: 9,
+                              vertical: 4,
+                            ),
+                            decoration: BoxDecoration(
+                              color: _LC.accent,
+                              borderRadius: BorderRadius.circular(12),
+                              boxShadow: [
+                                BoxShadow(
+                                  color: _LC.accent.withValues(alpha: 0.4),
+                                  blurRadius: 6,
+                                  offset: const Offset(0, 2),
+                                ),
+                              ],
+                            ),
+                            child: const Row(
+                              mainAxisSize: MainAxisSize.min,
+                              children: [
+                                Icon(
+                                  Icons.local_fire_department_rounded,
+                                  color: Colors.white,
+                                  size: 13,
+                                ),
+                                SizedBox(width: 4),
+                                Text(
+                                  'LIMITED TIME',
+                                  style: TextStyle(
+                                    fontSize: 9.5,
+                                    fontWeight: FontWeight.w800,
+                                    color: Colors.white,
+                                    letterSpacing: 0.4,
+                                    fontFamily: 'Poppins',
+                                  ),
+                                ),
+                              ],
+                            ),
+                          ),
+                        ),
+                      ],
+                    ),
+
+                    // Content Body
+                    Padding(
+                      padding: const EdgeInsets.fromLTRB(18, 16, 18, 20),
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Text(
+                            title,
+                            style: const TextStyle(
+                              fontSize: 17,
+                              fontWeight: FontWeight.w800,
+                              color: _LC.textPrimary,
+                              fontFamily: 'Poppins',
+                              height: 1.25,
+                            ),
+                          ),
+                          const SizedBox(height: 6),
+                          Text(
+                            subtitle,
+                            style: const TextStyle(
+                              fontSize: 12.5,
+                              color: _LC.textSecondary,
+                              height: 1.35,
+                              fontFamily: 'Poppins',
+                            ),
+                          ),
+                          const SizedBox(height: 18),
+
+                          // Action CTA Button
+                          SizedBox(
+                            width: double.infinity,
+                            height: 46,
+                            child: ElevatedButton(
+                              onPressed: () {
+                                HapticFeedback.mediumImpact();
+                                Navigator.pop(ctx);
+                                _handlePopupAction(actionRoute);
+                              },
+                              style: ElevatedButton.styleFrom(
+                                backgroundColor: _LC.accent,
+                                foregroundColor: Colors.white,
+                                elevation: 0,
+                                shape: RoundedRectangleBorder(
+                                  borderRadius: BorderRadius.circular(14),
+                                ),
+                              ),
+                              child: Row(
+                                mainAxisAlignment: MainAxisAlignment.center,
+                                children: [
+                                  Text(
+                                    buttonText,
+                                    style: const TextStyle(
+                                      fontSize: 14,
+                                      fontWeight: FontWeight.w700,
+                                      fontFamily: 'Poppins',
+                                    ),
+                                  ),
+                                  const SizedBox(width: 6),
+                                  const Icon(
+                                    Icons.arrow_forward_rounded,
+                                    size: 16,
+                                  ),
+                                ],
+                              ),
+                            ),
+                          ),
+                        ],
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            ),
+          ),
+        );
+      },
+      transitionBuilder: (ctx, anim1, anim2, child) {
+        final curved = CurvedAnimation(
+          parent: anim1,
+          curve: Curves.easeOutCubic,
+        );
+        return SlideTransition(
+          position: Tween<Offset>(
+            begin: const Offset(0, 0.25),
+            end: Offset.zero,
+          ).animate(curved),
+          child: FadeTransition(opacity: curved, child: child),
+        );
+      },
+    );
+  }
+
+  Widget _defaultPopupBanner() {
+    return Container(
+      height: 125,
+      decoration: const BoxDecoration(
+        gradient: LinearGradient(
+          colors: [Color(0xFFFF6B2B), Color(0xFFFF9248)],
+          begin: Alignment.topLeft,
+          end: Alignment.bottomRight,
+        ),
+      ),
+      child: Stack(
+        children: [
+          Positioned(
+            right: -20,
+            bottom: -20,
+            child: Icon(
+              Icons.fastfood_rounded,
+              size: 110,
+              color: Colors.white.withValues(alpha: 0.18),
+            ),
+          ),
+          Center(
+            child: Row(
+              mainAxisAlignment: MainAxisAlignment.center,
+              children: const [
+                Text('🥟', style: TextStyle(fontSize: 36)),
+                SizedBox(width: 10),
+                Text('🍰', style: TextStyle(fontSize: 36)),
+                SizedBox(width: 10),
+                Text('🍔', style: TextStyle(fontSize: 36)),
+              ],
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  void _handlePopupAction(String actionRoute) {
+    final raw = actionRoute.trim().toLowerCase();
+    final route = raw.replaceAll('/', '').replaceAll('-', '_');
+
+    if (route == 'street_food' || route == 'streetfood') {
+      widget.onSwitchTab(1);
+    } else if (route == 'sweets' || route == 'mithai' || route == 'custom_dabba' || route == 'customdabba') {
+      widget.onSwitchTab(2);
+    } else if (route == 'meals' || route == 'curated_meals') {
+      widget.onSwitchTab(3);
+    } else if (route == 'combos') {
+      Navigator.push(
+        context,
+        MaterialPageRoute(builder: (_) => const CombosListScreen()),
+      );
+    } else if (route == 'offers' || route == 'all_offers') {
+      Navigator.push(
+        context,
+        MaterialPageRoute(builder: (_) => const AllOffersScreen()),
+      );
+    } else if (route == 'festive_deals' || route == 'festivedeals') {
+      Navigator.push(
+        context,
+        MaterialPageRoute(
+          builder: (_) => AllFestiveDealsScreen(
+            deals: const [],
+            allVendors: _allVendors.map((e) => e.toMap()).toList(),
+          ),
+        ),
+      );
+    } else if (route == 'search') {
+      Navigator.push(
+        context,
+        MaterialPageRoute(builder: (_) => const SearchScreen()),
+      );
+    } else if (route == 'cart') {
+      Navigator.push(
+        context,
+        MaterialPageRoute(builder: (_) => const CartScreen()),
+      );
+    } else if (route == 'orders' || route == 'order_history') {
+      Navigator.push(
+        context,
+        MaterialPageRoute(builder: (_) => const OrderHistoryScreen()),
+      );
+    } else if (route == 'profile') {
+      Navigator.push(
+        context,
+        MaterialPageRoute(builder: (_) => const ProfileScreen()),
+      );
+    } else if (raw.startsWith('category:')) {
+      final cat = actionRoute.split(':').last.trim();
+      Navigator.push(
+        context,
+        MaterialPageRoute(
+          builder: (_) => CategoryItemsScreen(
+            category: cat,
+            catEmoji: _catEmoji(cat),
+          ),
+        ),
+      );
+    } else if (raw.startsWith('vendor:')) {
+      final vId = actionRoute.split(':').last.trim();
+      final vendor = _allVendors.where((v) => v.id == vId).firstOrNull;
+      if (vendor != null) {
+        Navigator.push(
+          context,
+          MaterialPageRoute(builder: (_) => VendorDetailScreen(vendor: vendor)),
+        );
+      }
+    } else {
+      widget.onSwitchTab(1);
+    }
   }
 
   Future<void> _onCategoryTap(String catName) async {
@@ -1480,7 +2079,10 @@ class _HomeTabState extends State<_HomeTab> with WidgetsBindingObserver {
   Future<void> _onRecommendedTap(MenuItemModel item) async {
     HapticFeedback.lightImpact();
     try {
-      final vendor = await _getVendorWithDistance(item.vendorId);
+      var vendor = await _getVendorWithDistance(item.vendorId);
+      if (vendor == null && _allVendors.isNotEmpty) {
+        vendor = _allVendors.first;
+      }
       if (!mounted || vendor == null) return;
 
       final userLat = _HomeCache.userLat;
@@ -1502,10 +2104,11 @@ class _HomeTabState extends State<_HomeTab> with WidgetsBindingObserver {
         );
       }
 
+      final targetVendor = vendor;
       Navigator.push(
         context,
         MaterialPageRoute(
-          builder: (_) => MenuItemDetailScreen(item: item, vendor: vendor),
+          builder: (_) => MenuItemDetailScreen(item: item, vendor: targetVendor),
         ),
       );
     } catch (_) {}
@@ -1542,15 +2145,26 @@ class _HomeTabState extends State<_HomeTab> with WidgetsBindingObserver {
           _homeCombos = []; // ✅ NEW
           _loadingOffers = true; // ✅ NEW OFFERS
           _homeOffers = []; // ✅ NEW OFFERS
+          _loadingDeals = true; // ✅ NEW
+          _todaysDeals = []; // ✅ NEW
+          _loadingTrending = true; // ✅ NEW
+          _trendingItems = []; // ✅ NEW
         });
-        await _loadAll(forceRefresh: true);
+        await Future.wait([
+          _loadAll(forceRefresh: true),
+          _loadGrowthSettings(),
+          _loadFlashDeals(),
+          _checkSpin24hStatus(),
+          _check24hOrderStatus(),
+          context.read<CartProvider>().reloadSettings(),
+        ]);
         _fetchUserLocation();
       },
       color: _LC.accent,
       displacement: 80,
       child: CustomScrollView(
-        controller: _scrollController,
         cacheExtent: 500,
+        controller: _scrollController,
         physics: const BouncingScrollPhysics(
           parent: AlwaysScrollableScrollPhysics(),
         ),
@@ -1579,6 +2193,12 @@ class _HomeTabState extends State<_HomeTab> with WidgetsBindingObserver {
                 if (b.actionRoute == 'street_food') widget.onSwitchTab(1);
                 if (b.actionRoute == 'restaurants') widget.onSwitchTab(2);
               },
+              onCartTap: () => Navigator.push(
+                context,
+                MaterialPageRoute(
+                  builder: (_) => const CartScreen(isStandalone: true),
+                ),
+              ),
               onProfileTap: () => Navigator.push(
                 context,
                 MaterialPageRoute(builder: (_) => const ProfileScreen()),
@@ -1597,6 +2217,34 @@ class _HomeTabState extends State<_HomeTab> with WidgetsBindingObserver {
               onCatTap: _onCategoryTap,
             ),
           ),
+          // ✅ 1. Live Order Counter — Positioned right after Categories as requested
+          if (_isLiveOrdersEnabled)
+            SliverToBoxAdapter(
+              child: _LiveOrderCounterSection(
+                text: _liveOrdersText,
+                orderCount: _liveOrdersCount,
+                userArea: _userArea,
+              ),
+            ),
+          // ✅ Growth 1: Free Delivery Milestone Bar on Home (when cart has items)
+          Consumer<CartProvider>(
+            builder: (context, cart, _) {
+              if (cart.items.isEmpty) return const SliverToBoxAdapter(child: SizedBox.shrink());
+              return SliverToBoxAdapter(
+                child: _buildHomeFreeDeliveryBar(cart),
+              );
+            },
+          ),
+          // ✅ Growth 2: Flash Rush Deals (with Zero Loss psychological strike price & countdown)
+          if (_isFlashSaleLive && !showFiltered)
+            SliverToBoxAdapter(
+              child: _buildFlashRushSection(),
+            ),
+          // ✅ Growth 3: Gated Spin & Win (Locked unless user ordered in 24h, Auto dynamic coupons)
+          if (_spinWheelEnabled && !showFiltered)
+            SliverToBoxAdapter(
+              child: _buildGatedSpinBanner(),
+            ),
           if (!showFiltered) SliverToBoxAdapter(child: _QuickFiltersRow()),
           if (_locationGranted == true && !_isInDeliveryZone)
             SliverToBoxAdapter(child: _OutOfZoneWidget()),
@@ -1620,6 +2268,53 @@ class _HomeTabState extends State<_HomeTab> with WidgetsBindingObserver {
               ),
             ),
           if (_isInDeliveryZone && _isAppActive && !showFiltered) ...[
+            // ✅ 2. Today's Best Deals (Horizontal scrolling deals with Admin control)
+            if (_loadingDeals || _todaysDeals.isNotEmpty)
+              SliverToBoxAdapter(
+                child: _TodaysDealsSection(
+                  items: _todaysDeals,
+                  loading: _loadingDeals,
+                  onItemTap: _onRecommendedTap,
+                  onViewAll: () {
+                    Navigator.push(
+                      context,
+                      MaterialPageRoute(
+                        builder: (_) => AllRecommendedScreen(
+                          title: "Today's Best Deals",
+                          emoji: "🔥",
+                          subtitle: "Special discounts & limited stock",
+                          preloadedItems: _todaysDeals,
+                          fetchType: 'deals',
+                        ),
+                      ),
+                    );
+                  },
+                ),
+              ),
+            // ✅ 3. Trending in Haldwani (Horizontal scrolling rankings #1, #2, #3 with Admin control)
+            if (_loadingTrending || _trendingItems.isNotEmpty)
+              SliverToBoxAdapter(
+                child: _TrendingNowSection(
+                  items: _trendingItems,
+                  loading: _loadingTrending,
+                  userArea: _userArea,
+                  onItemTap: _onRecommendedTap,
+                  onViewAll: () {
+                    Navigator.push(
+                      context,
+                      MaterialPageRoute(
+                        builder: (_) => AllRecommendedScreen(
+                          title: "Trending in $_userArea",
+                          emoji: "📈",
+                          subtitle: "Most ordered right now",
+                          preloadedItems: _trendingItems,
+                          fetchType: 'trending',
+                        ),
+                      ),
+                    );
+                  },
+                ),
+              ),
             // ✅ Combos section — sirf tab show ho jab combos available hon
             if (_homeCombos.isNotEmpty)
               SliverToBoxAdapter(
@@ -1648,7 +2343,11 @@ class _HomeTabState extends State<_HomeTab> with WidgetsBindingObserver {
                       context,
                       MaterialPageRoute(
                         builder: (_) => AllRecommendedScreen(
+                          title: "Recommended For You",
+                          emoji: "✨",
+                          subtitle: "Hand-picked by our team",
                           preloadedItems: _recommendedItems,
+                          fetchType: 'recommended',
                         ),
                       ),
                     );
@@ -1663,6 +2362,8 @@ class _HomeTabState extends State<_HomeTab> with WidgetsBindingObserver {
         ],
       ),
     ),
+    if (_showFomoToast && _fomoEnabled)
+      _buildFomoToastOverlay(),
   ],
 );
   }
@@ -1843,7 +2544,7 @@ class _HomeTabState extends State<_HomeTab> with WidgetsBindingObserver {
                 crossAxisCount: 2,
                 mainAxisSpacing: 10,
                 crossAxisSpacing: 10,
-                mainAxisExtent: 260,
+                mainAxisExtent: 215,
               ),
               delegate: SliverChildBuilderDelegate(
                 (context, index) {
@@ -1873,6 +2574,1888 @@ class _HomeTabState extends State<_HomeTab> with WidgetsBindingObserver {
     slivers.add(const SliverToBoxAdapter(child: SizedBox(height: 8)));
     return slivers;
   }
+
+  // ═══════════════════════════════════════════════════════════
+  // ── Growth & Order Revival Engine Helpers ──────────────────
+  // ═══════════════════════════════════════════════════════════
+
+  Future<void> _check24hOrderStatus() async {
+    try {
+      final user = _supabase.auth.currentUser;
+      if (user == null) {
+        if (mounted) {
+          setState(() {
+            _hasOrderedIn24h = false;
+            _spinEligibleLoading = false;
+          });
+        }
+        return;
+      }
+      final since = DateTime.now()
+          .subtract(const Duration(hours: 24))
+          .toIso8601String();
+      final orders = await _supabase
+          .from('orders')
+          .select('id, created_at, status')
+          .eq('user_id', user.id)
+          .gte('created_at', since)
+          .neq('status', 'cancelled')
+          .limit(1);
+      final hasOrder = (orders as List).isNotEmpty;
+      if (mounted) {
+        setState(() {
+          _hasOrderedIn24h = hasOrder;
+          _spinEligibleLoading = false;
+        });
+      }
+    } catch (_) {
+      if (mounted) setState(() => _spinEligibleLoading = false);
+    }
+  }
+
+  Future<void> _checkSpin24hStatus() async {
+    try {
+      if (!_spinLock24hEnabled) {
+        if (mounted) {
+          setState(() {
+            _isSpinLocked24h = false;
+            _spinCountdownText = '';
+          });
+        }
+        _spinCountdownTicker?.cancel();
+        return;
+      }
+      final prefs = await SharedPreferences.getInstance();
+      final userId = _supabase.auth.currentUser?.id ?? 'anon';
+      final lastSpinStr = prefs.getString('spin_last_timestamp_$userId');
+      final wonCode = prefs.getString('spin_last_won_code_$userId');
+      final wonTitle = prefs.getString('spin_last_won_title_$userId');
+
+      if (lastSpinStr != null) {
+        final lastSpinTime = DateTime.tryParse(lastSpinStr);
+        if (lastSpinTime != null) {
+          final diff = DateTime.now().difference(lastSpinTime);
+          if (diff < const Duration(hours: 24)) {
+            final remaining = const Duration(hours: 24) - diff;
+            if (mounted) {
+              setState(() {
+                _isSpinLocked24h = true;
+                _spinTimeRemaining = remaining;
+                _lastWonSpinCode = wonCode;
+                _lastWonSpinTitle = wonTitle;
+                _updateSpinCountdownText();
+              });
+              _startSpinCountdownTicker();
+              return;
+            }
+          }
+        }
+      }
+
+      if (mounted) {
+        setState(() {
+          _isSpinLocked24h = false;
+        });
+      }
+    } catch (_) {}
+  }
+
+  void _updateSpinCountdownText() {
+    final h = _spinTimeRemaining.inHours;
+    final m = _spinTimeRemaining.inMinutes.remainder(60);
+    final s = _spinTimeRemaining.inSeconds.remainder(60);
+    _spinCountdownText = '${h}h ${m}m ${s}s';
+  }
+
+  void _startSpinCountdownTicker() {
+    _spinCountdownTicker?.cancel();
+    _spinCountdownTicker = Timer.periodic(const Duration(seconds: 1), (timer) {
+      if (!mounted) {
+        timer.cancel();
+        return;
+      }
+      if (_spinTimeRemaining.inSeconds > 1) {
+        setState(() {
+          _spinTimeRemaining = _spinTimeRemaining - const Duration(seconds: 1);
+          _updateSpinCountdownText();
+        });
+      } else {
+        timer.cancel();
+        setState(() {
+          _isSpinLocked24h = false;
+          _spinCountdownText = '';
+        });
+        _check24hOrderStatus();
+      }
+    });
+  }
+
+  void _onSpinCompleted(String code, Map<String, dynamic> chosen) async {
+    final prefs = await SharedPreferences.getInstance();
+    final userId = _supabase.auth.currentUser?.id ?? 'anon';
+    final nowStr = DateTime.now().toIso8601String();
+    await prefs.setString('spin_last_timestamp_$userId', nowStr);
+    await prefs.setString('spin_last_won_code_$userId', code);
+    await prefs.setString('spin_last_won_title_$userId', chosen['title'] ?? '');
+
+    try {
+      final uId = _supabase.auth.currentUser?.id;
+      if (uId != null) {
+        await _supabase.from('users').update({'last_spin_at': nowStr}).eq('id', uId);
+      }
+    } catch (_) {}
+
+    if (mounted) {
+      setState(() {
+        _isSpinLocked24h = true;
+        _spinTimeRemaining = const Duration(hours: 24);
+        _lastWonSpinCode = code;
+        _lastWonSpinTitle = chosen['title'] ?? '';
+        _updateSpinCountdownText();
+      });
+      _startSpinCountdownTicker();
+    }
+  }
+
+  Future<void> _loadGrowthSettings() async {
+    try {
+      var data = await _supabase
+          .from('app_growth_configs')
+          .select()
+          .eq('id', 'default_config')
+          .maybeSingle();
+
+      data ??= await _supabase
+          .from('app_growth_configs')
+          .select()
+          .limit(1)
+          .maybeSingle();
+
+      if (data != null && mounted) {
+        final live = data['flash_rush_enabled'] as bool? ?? true;
+        final title = (data['flash_rush_title'] as String?)?.trim();
+        final timerMins = (data['flash_rush_timer_minutes'] as num?)?.toInt();
+        final fomoOn = data['fomo_social_proof_enabled'] as bool? ?? true;
+        final fomoInt =
+            (data['fomo_toast_interval_seconds'] as num?)?.toInt() ?? 26;
+        final spinOn = data['spin_wheel_enabled'] as bool? ?? true;
+        final spinReq24 = data['spin_require_24h_order'] as bool? ?? true;
+        final spinLock24 = data['spin_lock_24h_enabled'] as bool? ?? true;
+
+        List<Map<String, dynamic>>? slices;
+        final rawOffers = data['spin_offers'];
+        if (rawOffers is List && rawOffers.isNotEmpty) {
+          slices = rawOffers
+              .map((e) => Map<String, dynamic>.from(e as Map))
+              .toList();
+        }
+
+        _HomeCache.isFlashSaleLive = live;
+        if (title != null && title.isNotEmpty) {
+          _HomeCache.flashRushTitle = title;
+        }
+        if (timerMins != null && timerMins > 0) {
+          _HomeCache.flashSaleMinutes = timerMins;
+        }
+        _HomeCache.fomoEnabled = fomoOn;
+        _HomeCache.fomoIntervalSeconds = fomoInt;
+        _HomeCache.spinWheelEnabled = spinOn;
+        _HomeCache.spinRequire24hOrder = spinReq24;
+        _HomeCache.spinLock24hEnabled = spinLock24;
+        if (slices != null) {
+          _HomeCache.dynamicSpinSlices = slices;
+        }
+
+        setState(() {
+          _isFlashSaleLive = live;
+          if (title != null && title.isNotEmpty) {
+            _flashRushTitle = title;
+          }
+          if (timerMins != null && timerMins > 0) {
+            _flashSaleMinutes = timerMins;
+          }
+          _fomoEnabled = fomoOn;
+          _fomoIntervalSeconds = fomoInt;
+          _spinWheelEnabled = spinOn;
+          _spinRequire24hOrder = spinReq24;
+          _spinLock24hEnabled = spinLock24;
+          if (slices != null) {
+            _dynamicSpinSlices = slices;
+          }
+        });
+        _startFomoTimer();
+        _checkSpin24hStatus();
+      }
+    } catch (_) {}
+  }
+
+  Future<void> _loadFlashDeals() async {
+    try {
+      final rows = await _supabase
+          .from('festive_deals')
+          .select()
+          .order('display_order', ascending: true)
+          .limit(10);
+
+      final list = (rows as List).map((r) {
+        final row = Map<String, dynamic>.from(r as Map);
+        final vendorId = row['vendor_id']?.toString() ??
+            (_allVendors.isNotEmpty ? _allVendors.first.id : '');
+        final vendorName = _allVendors.isNotEmpty
+            ? _allVendors.first.name
+            : 'Streat Eats Special';
+        final price = (row['price'] as num?)?.toDouble() ?? 0.0;
+        final origPrice = (row['original_price'] as num?)?.toDouble();
+        return MenuItemModel(
+          id: row['id']?.toString() ?? '',
+          vendorId: vendorId,
+          vendorName: vendorName,
+          name: row['title'] as String? ?? 'Flash Deal',
+          description: row['subtitle'] as String? ?? '',
+          vendorPrice: price,
+          appPrice: price,
+          originalPrice: origPrice,
+          isDiscounted: origPrice != null && origPrice > price,
+          category: 'Flash Deal',
+          imageUrl: row['image_url'] as String?,
+          isAvailable: row['is_available'] as bool? ?? true,
+          dealTag: row['badge_text'] as String? ?? 'Flash Deal',
+          isTodaysDeal: true,
+        );
+      }).toList();
+
+      if (mounted) {
+        setState(() {
+          _flashDeals = list;
+        });
+      }
+    } catch (_) {}
+  }
+
+  void _setupRealtimeSubscriptions() {
+    try {
+      _growthChannel = _supabase
+          .channel('public:app_growth_configs')
+          .onPostgresChanges(
+            event: PostgresChangeEvent.all,
+            schema: 'public',
+            table: 'app_growth_configs',
+            callback: (payload) {
+              if (mounted) {
+                _loadGrowthSettings();
+                _checkSpin24hStatus();
+                context.read<CartProvider>().reloadSettings();
+              }
+            },
+          )
+          .subscribe();
+
+      _settingsChannel = _supabase
+          .channel('public:app_settings')
+          .onPostgresChanges(
+            event: PostgresChangeEvent.all,
+            schema: 'public',
+            table: 'app_settings',
+            callback: (payload) {
+              if (mounted) {
+                _loadLiveOrdersSettings();
+                _loadTiming();
+                context.read<CartProvider>().reloadSettings();
+              }
+            },
+          )
+          .subscribe();
+
+      _festiveDealsChannel = _supabase
+          .channel('public:festive_deals')
+          .onPostgresChanges(
+            event: PostgresChangeEvent.all,
+            schema: 'public',
+            table: 'festive_deals',
+            callback: (payload) {
+              if (mounted) {
+                _loadFlashDeals();
+              }
+            },
+          )
+          .subscribe();
+    } catch (_) {}
+  }
+
+  void _startFlashSaleTimer() {
+    _flashTimer?.cancel();
+    _flashTimer = Timer.periodic(const Duration(seconds: 1), (_) {
+      if (!mounted) return;
+      setState(() {
+        if (_flashSaleSeconds > 0) {
+          _flashSaleSeconds--;
+        } else if (_flashSaleMinutes > 0) {
+          _flashSaleMinutes--;
+          _flashSaleSeconds = 59;
+        } else {
+          _flashSaleMinutes = _HomeCache.flashSaleMinutes;
+          _flashSaleSeconds = 59;
+        }
+      });
+    });
+  }
+
+  void _startFomoTimer() {
+    _fomoTimer?.cancel();
+    final interval = _fomoIntervalSeconds > 10 ? _fomoIntervalSeconds : 26;
+    _fomoTimer = Timer.periodic(Duration(seconds: interval), (_) {
+      if (!mounted || !_fomoEnabled || _isDialogOpen) return;
+      setState(() {
+        _fomoIndex = (_fomoIndex + 1) % _fomoToasts.length;
+        _showFomoToast = true;
+      });
+      Future.delayed(const Duration(milliseconds: 3800), () {
+        if (mounted) {
+          setState(() => _showFomoToast = false);
+        }
+      });
+    });
+  }
+
+  Widget _buildFomoToastOverlay() {
+    if (_isDialogOpen || !_fomoEnabled || !_showFomoToast) {
+      return const SizedBox.shrink();
+    }
+    final t = _fomoToasts[_fomoIndex];
+    return Positioned(
+      bottom: 12,
+      left: 16,
+      right: 16,
+      child: Center(
+        child: Material(
+          color: Colors.transparent,
+          child: AnimatedOpacity(
+            duration: const Duration(milliseconds: 260),
+            opacity: _showFomoToast ? 1.0 : 0.0,
+            child: Container(
+              constraints: const BoxConstraints(maxWidth: 360),
+              padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 7),
+              decoration: BoxDecoration(
+                color: const Color(0xFF0F172A).withValues(alpha: 0.94),
+                borderRadius: BorderRadius.circular(30),
+                boxShadow: [
+                  BoxShadow(
+                    color: Colors.black.withValues(alpha: 0.22),
+                    blurRadius: 14,
+                    offset: const Offset(0, 4),
+                  ),
+                ],
+                border: Border.all(
+                  color: const Color(0xFFFF6B2B).withValues(alpha: 0.35),
+                  width: 1,
+                ),
+              ),
+              child: Row(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  Container(
+                    width: 28,
+                    height: 28,
+                    decoration: BoxDecoration(
+                      color: const Color(0xFFFF6B2B).withValues(alpha: 0.18),
+                      shape: BoxShape.circle,
+                    ),
+                    child: const Center(
+                      child: Text('🔥', style: TextStyle(fontSize: 14)),
+                    ),
+                  ),
+                  const SizedBox(width: 9),
+                  Flexible(
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        Row(
+                          mainAxisSize: MainAxisSize.min,
+                          children: [
+                            Flexible(
+                              child: Text(
+                                t['name'] ?? 'Foodie',
+                                style: const TextStyle(
+                                  color: Colors.white,
+                                  fontWeight: FontWeight.w700,
+                                  fontSize: 11.5,
+                                  fontFamily: 'Poppins',
+                                ),
+                                maxLines: 1,
+                                overflow: TextOverflow.ellipsis,
+                              ),
+                            ),
+                            const SizedBox(width: 6),
+                            Container(
+                              padding: const EdgeInsets.symmetric(
+                                horizontal: 5,
+                                vertical: 1.5,
+                              ),
+                              decoration: BoxDecoration(
+                                color: const Color(0xFF10B981).withValues(alpha: 0.2),
+                                borderRadius: BorderRadius.circular(4),
+                              ),
+                              child: Text(
+                                t['time'] ?? 'Just now',
+                                style: const TextStyle(
+                                  color: Color(0xFF34D399),
+                                  fontSize: 9,
+                                  fontWeight: FontWeight.w600,
+                                  fontFamily: 'Poppins',
+                                ),
+                              ),
+                            ),
+                          ],
+                        ),
+                        Text(
+                          t['item'] ?? 'just ordered on Streat Eats',
+                          style: TextStyle(
+                            color: Colors.grey[300],
+                            fontSize: 10.5,
+                            fontFamily: 'Poppins',
+                          ),
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
+                        ),
+                      ],
+                    ),
+                  ),
+                  const SizedBox(width: 8),
+                  GestureDetector(
+                    onTap: () => setState(() => _showFomoToast = false),
+                    child: Container(
+                      padding: const EdgeInsets.all(2),
+                      decoration: BoxDecoration(
+                        color: Colors.white.withValues(alpha: 0.1),
+                        shape: BoxShape.circle,
+                      ),
+                      child: Icon(Icons.close_rounded, color: Colors.grey[400], size: 14),
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+
+  Widget _buildHomeFreeDeliveryBar(CartProvider cart) {
+    if (!cart.isFreeDeliveryEnabled) return const SizedBox.shrink();
+    final threshold = cart.freeDeliveryMinAmount;
+    if (threshold <= 0) return const SizedBox.shrink();
+    final subtotal = cart.subtotal;
+    final diff = threshold - subtotal;
+    final isUnlocked = diff <= 0;
+    final progress = (subtotal / threshold).clamp(0.0, 1.0);
+
+    return Container(
+      margin: const EdgeInsets.fromLTRB(16, 12, 16, 6),
+      padding: const EdgeInsets.all(12),
+      decoration: BoxDecoration(
+        color: isUnlocked ? const Color(0xFFECFDF5) : const Color(0xFFFFF7ED),
+        borderRadius: BorderRadius.circular(14),
+        border: Border.all(
+          color: isUnlocked ? const Color(0xFFA7F3D0) : const Color(0xFFFFEDD5),
+        ),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            children: [
+              Text(
+                isUnlocked ? '🎉' : '🛵',
+                style: const TextStyle(fontSize: 16),
+              ),
+              const SizedBox(width: 8),
+              Expanded(
+                child: Text(
+                  isUnlocked
+                      ? 'Congratulations! FREE Delivery Unlocked'
+                      : 'Add ₹${diff.ceil()} more for FREE Delivery!',
+                  style: TextStyle(
+                    fontSize: 13,
+                    fontWeight: FontWeight.w700,
+                    color: isUnlocked
+                        ? const Color(0xFF065F46)
+                        : const Color(0xFF9A3412),
+                    fontFamily: 'Poppins',
+                  ),
+                ),
+              ),
+              GestureDetector(
+                onTap: () => Navigator.push(
+                  context,
+                  MaterialPageRoute(
+                    builder: (_) => const CartScreen(isStandalone: true),
+                  ),
+                ),
+                child: Container(
+                  padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
+                  decoration: BoxDecoration(
+                    color: isUnlocked
+                        ? const Color(0xFF059669)
+                        : const Color(0xFFEA580C),
+                    borderRadius: BorderRadius.circular(8),
+                  ),
+                  child: const Text(
+                    'View Cart',
+                    style: TextStyle(
+                      color: Colors.white,
+                      fontSize: 11,
+                      fontWeight: FontWeight.w700,
+                      fontFamily: 'Poppins',
+                    ),
+                  ),
+                ),
+              ),
+            ],
+          ),
+          const SizedBox(height: 8),
+          ClipRRect(
+            borderRadius: BorderRadius.circular(6),
+            child: LinearProgressIndicator(
+              value: progress,
+              backgroundColor: isUnlocked
+                  ? const Color(0xFFD1FAE5)
+                  : const Color(0xFFFFEDD5),
+              color: isUnlocked
+                  ? const Color(0xFF10B981)
+                  : const Color(0xFFFF6B2B),
+              minHeight: 6,
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildFlashRushSection() {
+    final dealItems = _flashDeals.isNotEmpty
+        ? _flashDeals
+        : (_todaysDeals.isNotEmpty
+            ? _todaysDeals.take(5).toList()
+            : _recommendedItems.take(5).toList());
+
+    if (dealItems.isEmpty) return const SizedBox.shrink();
+
+    final minStr = _flashSaleMinutes.toString().padLeft(2, '0');
+    final secStr = _flashSaleSeconds.toString().padLeft(2, '0');
+
+    return Container(
+      margin: const EdgeInsets.fromLTRB(16, 12, 16, 10),
+      padding: const EdgeInsets.all(14),
+      decoration: BoxDecoration(
+        gradient: const LinearGradient(
+          colors: [Color(0xFFFEF2F2), Color(0xFFFFF7ED)],
+          begin: Alignment.topLeft,
+          end: Alignment.bottomRight,
+        ),
+        borderRadius: BorderRadius.circular(16),
+        border: Border.all(color: const Color(0xFFFECACA), width: 1.2),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            children: [
+              Container(
+                padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
+                decoration: BoxDecoration(
+                  color: const Color(0xFFDC2626),
+                  borderRadius: BorderRadius.circular(6),
+                ),
+                child: const Row(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    Text('⚡', style: TextStyle(fontSize: 12)),
+                    SizedBox(width: 4),
+                    Text(
+                      'FLASH RUSH',
+                      style: TextStyle(
+                        color: Colors.white,
+                        fontSize: 11,
+                        fontWeight: FontWeight.w800,
+                        fontFamily: 'Poppins',
+                        letterSpacing: 0.5,
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+              const SizedBox(width: 8),
+              Expanded(
+                child: Text(
+                  _flashRushTitle,
+                  style: const TextStyle(
+                    fontSize: 12,
+                    color: Color(0xFF991B1B),
+                    fontWeight: FontWeight.w600,
+                    fontFamily: 'Poppins',
+                  ),
+                  overflow: TextOverflow.ellipsis,
+                ),
+              ),
+              Container(
+                padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
+                decoration: BoxDecoration(
+                  color: const Color(0xFF1F2937),
+                  borderRadius: BorderRadius.circular(6),
+                ),
+                child: Text(
+                  'Ends in $minStr:$secStr',
+                  style: const TextStyle(
+                    color: Color(0xFFFCD34D),
+                    fontSize: 11,
+                    fontWeight: FontWeight.w700,
+                    fontFamily: 'Poppins',
+                  ),
+                ),
+              ),
+            ],
+          ),
+          const SizedBox(height: 12),
+          SizedBox(
+            height: 160,
+            child: ListView.separated(
+              scrollDirection: Axis.horizontal,
+              itemCount: dealItems.length,
+              separatorBuilder: (_, __) => const SizedBox(width: 12),
+              itemBuilder: (context, i) {
+                final item = dealItems[i];
+                final strikePrice = (item.displayPrice * 1.55).round();
+                final discountPercent = (((strikePrice - item.displayPrice) / strikePrice) * 100).round();
+
+                return GestureDetector(
+                  onTap: () => _onRecommendedTap(item),
+                  child: Container(
+                    width: 130,
+                    decoration: BoxDecoration(
+                      color: Colors.white,
+                      borderRadius: BorderRadius.circular(12),
+                      boxShadow: [
+                        BoxShadow(
+                          color: Colors.black.withValues(alpha: 0.05),
+                          blurRadius: 8,
+                          offset: const Offset(0, 3),
+                        ),
+                      ],
+                    ),
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Stack(
+                          children: [
+                            ClipRRect(
+                              borderRadius: const BorderRadius.vertical(top: Radius.circular(12)),
+                              child: item.imageUrl != null && item.imageUrl!.isNotEmpty
+                                  ? CachedNetworkImage(
+                                      imageUrl: item.imageUrl!,
+                                      height: 80,
+                                      width: 130,
+                                      fit: BoxFit.cover,
+                                      errorWidget: (_, __, ___) => Container(
+                                        height: 80,
+                                        color: Colors.grey[200],
+                                        child: const Center(child: Text('🍲', style: TextStyle(fontSize: 24))),
+                                      ),
+                                    )
+                                  : Container(
+                                      height: 80,
+                                      color: Colors.grey[200],
+                                      child: const Center(child: Text('🍲', style: TextStyle(fontSize: 24))),
+                                    ),
+                            ),
+                            Positioned(
+                              top: 6,
+                              left: 6,
+                              child: Container(
+                                padding: const EdgeInsets.symmetric(horizontal: 5, vertical: 2),
+                                decoration: BoxDecoration(
+                                  color: const Color(0xFFDC2626),
+                                  borderRadius: BorderRadius.circular(4),
+                                ),
+                                child: Text(
+                                  '$discountPercent% OFF',
+                                  style: const TextStyle(
+                                    color: Colors.white,
+                                    fontSize: 9,
+                                    fontWeight: FontWeight.w800,
+                                    fontFamily: 'Poppins',
+                                  ),
+                                ),
+                              ),
+                            ),
+                          ],
+                        ),
+                        Padding(
+                          padding: const EdgeInsets.all(8),
+                          child: Column(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              Text(
+                                item.name,
+                                maxLines: 1,
+                                overflow: TextOverflow.ellipsis,
+                                style: const TextStyle(
+                                  fontSize: 12,
+                                  fontWeight: FontWeight.w700,
+                                  color: Color(0xFF1F2937),
+                                  fontFamily: 'Poppins',
+                                ),
+                              ),
+                              const SizedBox(height: 4),
+                              Row(
+                                children: [
+                                  Text(
+                                    '₹${item.displayPrice.round()}',
+                                    style: const TextStyle(
+                                      fontSize: 13,
+                                      fontWeight: FontWeight.w800,
+                                      color: Color(0xFFDC2626),
+                                      fontFamily: 'Poppins',
+                                    ),
+                                  ),
+                                  const SizedBox(width: 4),
+                                  Text(
+                                    '₹$strikePrice',
+                                    style: TextStyle(
+                                      fontSize: 10,
+                                      color: Colors.grey[500],
+                                      decoration: TextDecoration.lineThrough,
+                                      fontFamily: 'Poppins',
+                                    ),
+                                  ),
+                                  const Spacer(),
+                                  GestureDetector(
+                                    onTap: () {
+                                      HapticFeedback.mediumImpact();
+                                      final vendor = _vendorCache[item.vendorId] ??
+                                          _allVendors.firstWhere(
+                                            (v) => v.id == item.vendorId,
+                                            orElse: () => VendorModel(
+                                              id: item.vendorId,
+                                              name: item.vendorName.isNotEmpty
+                                                  ? item.vendorName
+                                                  : 'Streat Eats Vendor',
+                                              area: _userArea,
+                                              phone: '',
+                                              city: 'Haldwani',
+                                              latitude: 0.0,
+                                              longitude: 0.0,
+                                              category: item.category,
+                                              timing: '17:00 - 21:00',
+                                              isActive: true,
+                                            ),
+                                          );
+                                      CartUtils.handleCartAddItem(
+                                        context,
+                                        item,
+                                        vendor,
+                                        onSuccess: () {
+                                          AppSnackBar.showSuccess(context, 'Added ${item.name} to cart!');
+                                        },
+                                        onLimitReached: () {
+                                          AppSnackBar.showError(context, 'Cart limit reached!');
+                                        },
+                                      );
+                                    },
+                                    child: Container(
+                                      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                                      decoration: BoxDecoration(
+                                        color: const Color(0xFFFF6B2B),
+                                        borderRadius: BorderRadius.circular(6),
+                                      ),
+                                      child: const Text(
+                                        '+ ADD',
+                                        style: TextStyle(
+                                          color: Colors.white,
+                                          fontSize: 10,
+                                          fontWeight: FontWeight.w800,
+                                          fontFamily: 'Poppins',
+                                        ),
+                                      ),
+                                    ),
+                                  ),
+                                ],
+                              ),
+                            ],
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                );
+              },
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildGatedSpinBanner() {
+    return GestureDetector(
+      onTap: () {
+        HapticFeedback.lightImpact();
+        if (_isSpinLocked24h) {
+          _showSpin24hLockedSheet();
+        } else if (!_spinRequire24hOrder || _hasOrderedIn24h) {
+          _showSpinWheelDialog();
+        } else {
+          _showSpinLockedSheet();
+        }
+      },
+      child: Container(
+        margin: const EdgeInsets.fromLTRB(16, 6, 16, 12),
+        padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
+        decoration: BoxDecoration(
+          gradient: LinearGradient(
+            colors: _isSpinLocked24h
+                ? const [Color(0xFF1E1B4B), Color(0xFF312E81)]
+                : const [Color(0xFF2E1065), Color(0xFF4C1D95)],
+            begin: Alignment.topLeft,
+            end: Alignment.bottomRight,
+          ),
+          borderRadius: BorderRadius.circular(16),
+          boxShadow: [
+            BoxShadow(
+              color: const Color(0xFF4C1D95).withValues(alpha: 0.3),
+              blurRadius: 10,
+              offset: const Offset(0, 4),
+            ),
+          ],
+        ),
+        child: Row(
+          children: [
+            Container(
+              width: 44,
+              height: 44,
+              decoration: BoxDecoration(
+                color: const Color(0xFFFBBF24).withValues(alpha: 0.2),
+                shape: BoxShape.circle,
+                border: Border.all(color: const Color(0xFFFBBF24), width: 1.5),
+              ),
+              child: Center(
+                child: Text(
+                  _isSpinLocked24h ? '⏳' : '🎰',
+                  style: const TextStyle(fontSize: 22),
+                ),
+              ),
+            ),
+            const SizedBox(width: 12),
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Row(
+                    children: [
+                      const Text(
+                        'Spin & Win Jackpot',
+                        style: TextStyle(
+                          color: Colors.white,
+                          fontSize: 14,
+                          fontWeight: FontWeight.w800,
+                          fontFamily: 'Poppins',
+                        ),
+                      ),
+                      const SizedBox(width: 6),
+                      Container(
+                        padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 1.5),
+                        decoration: BoxDecoration(
+                          color: _isSpinLocked24h ? const Color(0xFFF59E0B) : const Color(0xFFFBBF24),
+                          borderRadius: BorderRadius.circular(4),
+                        ),
+                        child: Text(
+                          _isSpinLocked24h ? '24H LOCK' : 'DAILY',
+                          style: TextStyle(
+                            color: _isSpinLocked24h ? Colors.white : const Color(0xFF2E1065),
+                            fontSize: 9,
+                            fontWeight: FontWeight.w900,
+                            fontFamily: 'Poppins',
+                          ),
+                        ),
+                      ),
+                    ],
+                  ),
+                  const SizedBox(height: 3),
+                  Text(
+                    _isSpinLocked24h
+                        ? '⏳ Spun! Next spin in: $_spinCountdownText'
+                        : (_hasOrderedIn24h || !_spinRequire24hOrder
+                            ? '🎉 UNLOCKED! Tap to spin and claim food rewards'
+                            : '🔒 Locked! Order in last 24h to unlock spin'),
+                    style: TextStyle(
+                      color: _isSpinLocked24h
+                          ? const Color(0xFFFCD34D)
+                          : ((_hasOrderedIn24h || !_spinRequire24hOrder)
+                              ? const Color(0xFF34D399)
+                              : const Color(0xFFFCD34D)),
+                      fontSize: 11,
+                      fontWeight: FontWeight.w600,
+                      fontFamily: 'Poppins',
+                    ),
+                  ),
+                ],
+              ),
+            ),
+            const SizedBox(width: 8),
+            Container(
+              padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+              decoration: BoxDecoration(
+                color: _isSpinLocked24h
+                    ? const Color(0xFF374151)
+                    : ((_hasOrderedIn24h || !_spinRequire24hOrder)
+                        ? const Color(0xFF10B981)
+                        : const Color(0xFF374151)),
+                borderRadius: BorderRadius.circular(8),
+              ),
+              child: Row(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  Icon(
+                    _isSpinLocked24h
+                        ? Icons.timer_outlined
+                        : ((_hasOrderedIn24h || !_spinRequire24hOrder)
+                            ? Icons.play_arrow_rounded
+                            : Icons.lock_outline_rounded),
+                    color: Colors.white,
+                    size: 14,
+                  ),
+                  const SizedBox(width: 4),
+                  Text(
+                    _isSpinLocked24h
+                        ? 'LOCKED'
+                        : ((_hasOrderedIn24h || !_spinRequire24hOrder) ? 'SPIN' : 'RULES'),
+                    style: const TextStyle(
+                      color: Colors.white,
+                      fontSize: 11,
+                      fontWeight: FontWeight.w800,
+                      fontFamily: 'Poppins',
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  void _showSpin24hLockedSheet() {
+    _isDialogOpen = true;
+    showModalBottomSheet(
+      context: context,
+      backgroundColor: Colors.white,
+      isScrollControlled: true,
+      shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(top: Radius.circular(24)),
+      ),
+      builder: (ctx) => StatefulBuilder(
+        builder: (ctx, setSheetState) {
+          return Padding(
+            padding: EdgeInsets.fromLTRB(20, 16, 20, MediaQuery.of(ctx).viewInsets.bottom + 24),
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                Container(
+                  width: 40,
+                  height: 4,
+                  decoration: BoxDecoration(
+                    color: Colors.grey[300],
+                    borderRadius: BorderRadius.circular(2),
+                  ),
+                ),
+                const SizedBox(height: 18),
+                Container(
+                  width: 60,
+                  height: 60,
+                  decoration: BoxDecoration(
+                    color: const Color(0xFFFEF3C7),
+                    shape: BoxShape.circle,
+                    border: Border.all(color: const Color(0xFFF59E0B), width: 1.5),
+                  ),
+                  child: const Center(
+                    child: Text('⏳', style: TextStyle(fontSize: 28)),
+                  ),
+                ),
+                const SizedBox(height: 14),
+                const Text(
+                  'Daily Spin Used! 🎰',
+                  style: TextStyle(
+                    fontSize: 18,
+                    fontWeight: FontWeight.w800,
+                    color: Color(0xFF1F2937),
+                    fontFamily: 'Poppins',
+                  ),
+                ),
+                const SizedBox(height: 6),
+                const Text(
+                  'You can spin the wheel once every 24 hours. Your next spin will unlock automatically after the timer expires.',
+                  textAlign: TextAlign.center,
+                  style: TextStyle(
+                    fontSize: 12.5,
+                    color: Color(0xFF6B7280),
+                    height: 1.4,
+                    fontFamily: 'Poppins',
+                  ),
+                ),
+                const SizedBox(height: 16),
+                Container(
+                  width: double.infinity,
+                  padding: const EdgeInsets.symmetric(vertical: 14, horizontal: 16),
+                  decoration: BoxDecoration(
+                    gradient: const LinearGradient(
+                      colors: [Color(0xFF1E1B4B), Color(0xFF312E81)],
+                      begin: Alignment.topLeft,
+                      end: Alignment.bottomRight,
+                    ),
+                    borderRadius: BorderRadius.circular(16),
+                    boxShadow: [
+                      BoxShadow(
+                        color: const Color(0xFF312E81).withValues(alpha: 0.25),
+                        blurRadius: 10,
+                        offset: const Offset(0, 4),
+                      ),
+                    ],
+                  ),
+                  child: Column(
+                    children: [
+                      const Text(
+                        'NEXT SPIN UNLOCKS IN',
+                        style: TextStyle(
+                          fontSize: 10.5,
+                          fontWeight: FontWeight.w800,
+                          letterSpacing: 1.2,
+                          color: Color(0xFFFBBF24),
+                          fontFamily: 'Poppins',
+                        ),
+                      ),
+                      const SizedBox(height: 6),
+                      Text(
+                        _spinCountdownText.isNotEmpty ? _spinCountdownText : '24h 00m 00s',
+                        style: const TextStyle(
+                          fontSize: 24,
+                          fontWeight: FontWeight.w900,
+                          color: Colors.white,
+                          letterSpacing: 1.5,
+                          fontFamily: 'Poppins',
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+                if (_lastWonSpinCode != null && _lastWonSpinCode!.isNotEmpty) ...[
+                  const SizedBox(height: 14),
+                  Container(
+                    width: double.infinity,
+                    padding: const EdgeInsets.all(12),
+                    decoration: BoxDecoration(
+                      color: const Color(0xFFF0FDF4),
+                      borderRadius: BorderRadius.circular(12),
+                      border: Border.all(color: const Color(0xFF86EFAC)),
+                    ),
+                    child: Row(
+                      mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                      children: [
+                        Expanded(
+                          child: Column(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              Text(
+                                'Active Won Reward: ${_lastWonSpinTitle ?? "Discount"}',
+                                style: const TextStyle(
+                                  fontSize: 11,
+                                  fontWeight: FontWeight.w700,
+                                  color: Color(0xFF166534),
+                                  fontFamily: 'Poppins',
+                                ),
+                              ),
+                              const SizedBox(height: 2),
+                              Text(
+                                _lastWonSpinCode!,
+                                style: const TextStyle(
+                                  fontSize: 15,
+                                  fontWeight: FontWeight.w900,
+                                  color: Color(0xFF15803D),
+                                  letterSpacing: 1,
+                                  fontFamily: 'Poppins',
+                                ),
+                              ),
+                            ],
+                          ),
+                        ),
+                        ElevatedButton(
+                          onPressed: () {
+                            Clipboard.setData(ClipboardData(text: _lastWonSpinCode!));
+                            AppSnackBar.showSuccess(context, 'Coupon copied to clipboard!');
+                          },
+                          style: ElevatedButton.styleFrom(
+                            backgroundColor: const Color(0xFF16A34A),
+                            foregroundColor: Colors.white,
+                            padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+                            shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
+                            elevation: 0,
+                          ),
+                          child: const Text('Copy', style: TextStyle(fontSize: 12, fontWeight: FontWeight.bold)),
+                        ),
+                      ],
+                    ),
+                  ),
+                ],
+                const SizedBox(height: 18),
+                SizedBox(
+                  width: double.infinity,
+                  height: 48,
+                  child: ElevatedButton(
+                    onPressed: () {
+                      Navigator.pop(ctx);
+                      widget.onSwitchTab(1);
+                    },
+                    style: ElevatedButton.styleFrom(
+                      backgroundColor: const Color(0xFFFF6B2B),
+                      shape: RoundedRectangleBorder(
+                        borderRadius: BorderRadius.circular(12),
+                      ),
+                      elevation: 0,
+                    ),
+                    child: const Text(
+                      'Order Food Now 🍕',
+                      style: TextStyle(
+                        fontSize: 14,
+                        fontWeight: FontWeight.w700,
+                        color: Colors.white,
+                        fontFamily: 'Poppins',
+                      ),
+                    ),
+                  ),
+                ),
+              ],
+            ),
+          );
+        },
+      ),
+    ).whenComplete(() {
+      _isDialogOpen = false;
+    });
+  }
+
+  void _showSpinLockedSheet() {
+    _isDialogOpen = true;
+    showModalBottomSheet(
+      context: context,
+      backgroundColor: Colors.white,
+      isScrollControlled: true,
+      shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(top: Radius.circular(24)),
+      ),
+      builder: (ctx) => Padding(
+        padding: EdgeInsets.fromLTRB(20, 20, 20, MediaQuery.of(ctx).viewInsets.bottom + 24),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Container(
+              width: 40,
+              height: 4,
+              decoration: BoxDecoration(
+                color: Colors.grey[300],
+                borderRadius: BorderRadius.circular(2),
+              ),
+            ),
+            const SizedBox(height: 18),
+            Container(
+              width: 60,
+              height: 60,
+              decoration: BoxDecoration(
+                color: const Color(0xFFFEF3C7),
+                shape: BoxShape.circle,
+                border: Border.all(color: const Color(0xFFF59E0B), width: 1.5),
+              ),
+              child: const Center(
+                child: Icon(Icons.lock_rounded, color: Color(0xFFD97706), size: 30),
+              ),
+            ),
+            const SizedBox(height: 14),
+            const Text(
+              'Spin & Win is Locked 🔒',
+              style: TextStyle(
+                fontSize: 18,
+                fontWeight: FontWeight.w800,
+                color: Color(0xFF1F2937),
+                fontFamily: 'Poppins',
+              ),
+            ),
+            const SizedBox(height: 6),
+            const Text(
+              'Place at least 1 order in the last 24 hours to unlock the Daily Foodie Spin & Win jackpot!',
+              textAlign: TextAlign.center,
+              style: TextStyle(
+                fontSize: 13,
+                color: Color(0xFF6B7280),
+                height: 1.4,
+                fontFamily: 'Poppins',
+              ),
+            ),
+            const SizedBox(height: 16),
+            Container(
+              padding: const EdgeInsets.all(14),
+              decoration: BoxDecoration(
+                color: const Color(0xFFF9FAFB),
+                borderRadius: BorderRadius.circular(14),
+                border: Border.all(color: const Color(0xFFE5E7EB)),
+              ),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  const Text(
+                    '📋 How It Works & Conditions:',
+                    style: TextStyle(
+                      fontSize: 13,
+                      fontWeight: FontWeight.w700,
+                      color: Color(0xFF111827),
+                      fontFamily: 'Poppins',
+                    ),
+                  ),
+                  const SizedBox(height: 8),
+                  _buildSpinRuleRow('🎯', 'Place 1 order today to automatically unlock this wheel'),
+                  _buildSpinRuleRow('⚡', 'Wheel remains unlocked for 24 hours from your order time'),
+                  _buildSpinRuleRow('🎟️', 'Win auto-generated single-use coupons (Free Delivery, Packaging, Platform Fee, Flat OFF)'),
+                  _buildSpinRuleRow('🛒', 'Coupon applies automatically on minimum order value'),
+                ],
+              ),
+            ),
+            const SizedBox(height: 20),
+            SizedBox(
+              width: double.infinity,
+              height: 48,
+              child: ElevatedButton(
+                onPressed: () {
+                  Navigator.pop(ctx);
+                  widget.onSwitchTab(1); // Street Food tab
+                },
+                style: ElevatedButton.styleFrom(
+                  backgroundColor: const Color(0xFFFF6B2B),
+                  shape: RoundedRectangleBorder(
+                    borderRadius: BorderRadius.circular(12),
+                  ),
+                  elevation: 0,
+                ),
+                child: const Text(
+                  'Order Food & Unlock Spin 🍕',
+                  style: TextStyle(
+                    fontSize: 14,
+                    fontWeight: FontWeight.w700,
+                    color: Colors.white,
+                    fontFamily: 'Poppins',
+                  ),
+                ),
+              ),
+            ),
+          ],
+        ),
+      ),
+    ).whenComplete(() {
+      _isDialogOpen = false;
+    });
+  }
+
+  Widget _buildSpinRuleRow(String emoji, String text) {
+    return Padding(
+      padding: const EdgeInsets.symmetric(vertical: 3),
+      child: Row(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Text(emoji, style: const TextStyle(fontSize: 14)),
+          const SizedBox(width: 8),
+          Expanded(
+            child: Text(
+              text,
+              style: const TextStyle(
+                fontSize: 12,
+                color: Color(0xFF4B5563),
+                fontFamily: 'Poppins',
+                height: 1.3,
+              ),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  void _showSpinWheelDialog() {
+    _isDialogOpen = true;
+    showDialog(
+      context: context,
+      barrierDismissible: true,
+      builder: (_) => _SpinWheelDialog(
+        customSlices: _dynamicSpinSlices.isNotEmpty ? _dynamicSpinSlices : null,
+        onWon: (code, chosen) {
+          _onSpinCompleted(code, chosen);
+        },
+      ),
+    ).whenComplete(() {
+      _isDialogOpen = false;
+    });
+  }
+}
+
+// ═══════════════════════════════════════════════════════════
+// ── Spin Wheel Dialog Widget ───────────────────────────────
+// ═══════════════════════════════════════════════════════════
+class _SpinWheelDialog extends StatefulWidget {
+  final List<Map<String, dynamic>>? customSlices;
+  final Function(String code, Map<String, dynamic> chosen)? onWon;
+
+  const _SpinWheelDialog({this.customSlices, this.onWon});
+
+  @override
+  State<_SpinWheelDialog> createState() => _SpinWheelDialogState();
+}
+
+class _SpinWheelDialogState extends State<_SpinWheelDialog>
+    with SingleTickerProviderStateMixin {
+  late final AnimationController _ctrl;
+  late Animation<double> _anim;
+  bool _isSpinning = false;
+  bool _hasWon = false;
+  Map<String, dynamic>? _wonReward;
+  String? _generatedCode;
+
+  static final List<Map<String, dynamic>> _defaultSlices = [
+    {
+      'title': 'FREE DELIVERY',
+      'label': 'FREE SHIP',
+      'type': 'free_delivery',
+      'minCart': 99,
+      'discount': 0,
+      'isFree': true,
+      'isPercent': false,
+      'color': const Color(0xFF10B981),
+    },
+    {
+      'title': 'FREE PACKAGING',
+      'label': 'FREE PKG',
+      'type': 'free_packaging',
+      'minCart': 99,
+      'discount': 0,
+      'isFree': true,
+      'isPercent': false,
+      'color': const Color(0xFF3B82F6),
+    },
+    {
+      'title': 'FREE PLATFORM FEE',
+      'label': 'NO FEE',
+      'type': 'free_platform_fee',
+      'minCart': 99,
+      'discount': 0,
+      'isFree': true,
+      'isPercent': false,
+      'color': const Color(0xFF06B6D4),
+    },
+    {
+      'title': 'FLAT ₹20 OFF',
+      'label': '₹20 OFF',
+      'type': 'flat',
+      'minCart': 129,
+      'discount': 20,
+      'isFree': false,
+      'isPercent': false,
+      'color': const Color(0xFFEC4899),
+    },
+    {
+      'title': 'FLAT ₹30 OFF',
+      'label': '₹30 OFF',
+      'type': 'flat',
+      'minCart': 149,
+      'discount': 30,
+      'isFree': false,
+      'isPercent': false,
+      'color': const Color(0xFFFF6B2B),
+    },
+    {
+      'title': 'FLAT ₹40 OFF',
+      'label': '₹40 OFF',
+      'type': 'flat',
+      'minCart': 199,
+      'discount': 40,
+      'isFree': false,
+      'isPercent': false,
+      'color': const Color(0xFFF59E0B),
+    },
+  ];
+
+  List<Map<String, dynamic>> get _slices {
+    if (widget.customSlices != null && widget.customSlices!.isNotEmpty) {
+      return widget.customSlices!.map((s) {
+        final title = s['title'] as String? ?? 'Offer';
+        final label = s['label'] as String? ?? title;
+        final type = s['type'] as String? ?? 'flat';
+        final val = (s['value'] as num?)?.toInt() ?? 20;
+        final minCart = (s['min_cart'] as num?)?.toInt() ?? 149;
+        Color col;
+        try {
+          final cStr = s['color']?.toString() ?? '';
+          if (cStr.startsWith('0x') || cStr.startsWith('0X')) {
+            col = Color(int.parse(cStr));
+          } else if (cStr.startsWith('#')) {
+            col = Color(int.parse(cStr.replaceFirst('#', '0xFF')));
+          } else {
+            col = const Color(0xFFFF6B2B);
+          }
+        } catch (_) {
+          col = const Color(0xFFFF6B2B);
+        }
+        return {
+          'title': title,
+          'label': label,
+          'type': type,
+          'discount': val,
+          'minCart': minCart,
+          'isFree': type == 'free_delivery' ||
+              type == 'free_packaging' ||
+              type == 'free_platform_fee',
+          'isPercent': type == 'percent',
+          'color': col,
+        };
+      }).toList();
+    }
+    return _defaultSlices;
+  }
+
+  @override
+  void initState() {
+    super.initState();
+    _ctrl = AnimationController(
+      vsync: this,
+      duration: const Duration(milliseconds: 2800),
+    );
+    _anim = CurvedAnimation(parent: _ctrl, curve: Curves.easeOutCubic);
+  }
+
+  @override
+  void dispose() {
+    _ctrl.dispose();
+    super.dispose();
+  }
+
+  Future<void> _spinWheel() async {
+    if (_isSpinning || _hasWon) return;
+    setState(() => _isSpinning = true);
+    HapticFeedback.heavyImpact();
+
+    final slicesList = _slices;
+    final targetIndex = Random().nextInt(slicesList.length);
+    final chosen = slicesList[targetIndex];
+
+    final anglePerSlice = (2 * pi) / slicesList.length;
+    final targetAngle = (5 * 2 * pi) + (targetIndex * anglePerSlice);
+
+    _anim = Tween<double>(begin: 0, end: targetAngle).animate(
+      CurvedAnimation(parent: _ctrl, curve: Curves.easeOutCubic),
+    );
+
+    await _ctrl.forward(from: 0);
+    HapticFeedback.lightImpact();
+
+    final type = chosen['type'] ?? 'flat';
+    final randSuffix = Random().nextInt(9000) + 1000;
+    String prefix = 'SPIN';
+    if (type == 'free_delivery') {
+      prefix = 'FREEDEL';
+    } else if (type == 'free_packaging') {
+      prefix = 'FREEPKG';
+    } else if (type == 'free_platform_fee') {
+      prefix = 'NOFEE';
+    } else if (type == 'percent') {
+      prefix = 'DISC${chosen['discount']}';
+    } else {
+      prefix = 'SPIN${chosen['discount']}';
+    }
+    final code = '$prefix-$randSuffix';
+
+    String dType = 'none';
+    double dVal = 0;
+    String pkgType = 'none';
+    double pkgVal = 0;
+    String pltType = 'none';
+    double pltVal = 0;
+
+    if (type == 'free_delivery') {
+      dType = 'free';
+    } else if (type == 'free_packaging') {
+      pkgType = 'free';
+    } else if (type == 'free_platform_fee') {
+      pltType = 'free';
+    } else if (type == 'percent') {
+      dType = 'percent';
+      dVal = (chosen['discount'] as num).toDouble();
+    } else {
+      dType = 'flat';
+      dVal = (chosen['discount'] as num).toDouble();
+    }
+
+    try {
+      final expiresAt = DateTime.now().add(const Duration(hours: 24)).toIso8601String();
+      await Supabase.instance.client.from('offers').insert({
+        'coupon_code': code,
+        'title': 'Spin & Win: ${chosen['title']}',
+        'description': 'Valid on min cart ₹${chosen['minCart']}. 24h single-use reward.',
+        'delivery_discount_type': dType,
+        'delivery_discount_value': dVal,
+        'platform_fee_discount_type': pltType,
+        'platform_fee_discount_value': pltVal,
+        'packaging_fee_discount_type': pkgType,
+        'packaging_fee_discount_value': pkgVal,
+        'min_cart_value': chosen['minCart'],
+        'max_uses_new': 1,
+        'is_active': true,
+        'expires_at': expiresAt,
+      });
+    } catch (_) {}
+
+    widget.onWon?.call(code, chosen);
+
+    if (mounted) {
+      setState(() {
+        _isSpinning = false;
+        _hasWon = true;
+        _wonReward = chosen;
+        _generatedCode = code;
+      });
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final slicesList = _slices;
+    return Dialog(
+      backgroundColor: Colors.transparent,
+      insetPadding: const EdgeInsets.symmetric(horizontal: 20),
+      child: Container(
+        padding: const EdgeInsets.all(20),
+        decoration: BoxDecoration(
+          color: Colors.white,
+          borderRadius: BorderRadius.circular(24),
+          boxShadow: [
+            BoxShadow(
+              color: Colors.black.withValues(alpha: 0.2),
+              blurRadius: 20,
+              offset: const Offset(0, 10),
+            ),
+          ],
+        ),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Row(
+              children: [
+                const Text('🎰', style: TextStyle(fontSize: 22)),
+                const SizedBox(width: 8),
+                const Text(
+                  'Daily Spin & Win',
+                  style: TextStyle(
+                    fontSize: 18,
+                    fontWeight: FontWeight.w800,
+                    color: Color(0xFF1F2937),
+                    fontFamily: 'Poppins',
+                  ),
+                ),
+                const Spacer(),
+                GestureDetector(
+                  onTap: () => Navigator.pop(context),
+                  child: Container(
+                    padding: const EdgeInsets.all(4),
+                    decoration: BoxDecoration(
+                      color: Colors.grey[100],
+                      shape: BoxShape.circle,
+                    ),
+                    child: const Icon(Icons.close, size: 18, color: Colors.grey),
+                  ),
+                ),
+              ],
+            ),
+            const SizedBox(height: 6),
+            Text(
+              _hasWon
+                  ? '🎉 Congratulations! Your coupon is generated & active!'
+                  : 'Spin the wheel to win your exclusive 24-hour food reward!',
+              textAlign: TextAlign.center,
+              style: TextStyle(
+                fontSize: 12,
+                color: _hasWon ? const Color(0xFF059669) : const Color(0xFF6B7280),
+                fontWeight: _hasWon ? FontWeight.w700 : FontWeight.normal,
+                fontFamily: 'Poppins',
+              ),
+            ),
+            const SizedBox(height: 18),
+            if (!_hasWon) ...[
+              SizedBox(
+                width: 220,
+                height: 220,
+                child: Stack(
+                  alignment: Alignment.center,
+                  children: [
+                    AnimatedBuilder(
+                      animation: _anim,
+                      builder: (context, child) {
+                        return Transform.rotate(
+                          angle: _anim.value,
+                          child: child,
+                        );
+                      },
+                      child: Container(
+                        width: 210,
+                        height: 210,
+                        decoration: BoxDecoration(
+                          shape: BoxShape.circle,
+                          boxShadow: [
+                            BoxShadow(
+                              color: const Color(0xFFFF6B2B).withValues(alpha: 0.25),
+                              blurRadius: 16,
+                            ),
+                          ],
+                        ),
+                        child: CustomPaint(
+                          painter: _WheelPainter(slices: slicesList),
+                        ),
+                      ),
+                    ),
+                    Positioned(
+                      top: 0,
+                      child: Container(
+                        width: 18,
+                        height: 22,
+                        decoration: const BoxDecoration(
+                          color: Color(0xFF1F2937),
+                          shape: BoxShape.circle,
+                        ),
+                        child: const Icon(Icons.arrow_drop_down, color: Colors.white, size: 20),
+                      ),
+                    ),
+                    Container(
+                      width: 50,
+                      height: 50,
+                      decoration: const BoxDecoration(
+                        color: Colors.white,
+                        shape: BoxShape.circle,
+                        boxShadow: [
+                          BoxShadow(color: Colors.black26, blurRadius: 6),
+                        ],
+                      ),
+                      child: const Center(
+                        child: Text('🎁', style: TextStyle(fontSize: 22)),
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+              const SizedBox(height: 20),
+              SizedBox(
+                width: double.infinity,
+                height: 48,
+                child: ElevatedButton(
+                  onPressed: _isSpinning ? null : _spinWheel,
+                  style: ElevatedButton.styleFrom(
+                    backgroundColor: const Color(0xFFFF6B2B),
+                    shape: RoundedRectangleBorder(
+                      borderRadius: BorderRadius.circular(12),
+                    ),
+                    elevation: 0,
+                  ),
+                  child: Text(
+                    _isSpinning ? 'SPINNING... 🎲' : 'SPIN THE WHEEL! 🚀',
+                    style: const TextStyle(
+                      fontSize: 14,
+                      fontWeight: FontWeight.w800,
+                      color: Colors.white,
+                      fontFamily: 'Poppins',
+                    ),
+                  ),
+                ),
+              ),
+            ] else ...[
+              Container(
+                width: double.infinity,
+                padding: const EdgeInsets.all(16),
+                decoration: BoxDecoration(
+                  color: const Color(0xFFF0FDF4),
+                  borderRadius: BorderRadius.circular(16),
+                  border: Border.all(color: const Color(0xFFBBF7D0)),
+                ),
+                child: Column(
+                  children: [
+                    const Text('🎊 YOU WON! 🎊', style: TextStyle(fontSize: 16, fontWeight: FontWeight.w900, color: Color(0xFF15803D), fontFamily: 'Poppins')),
+                    const SizedBox(height: 6),
+                    Text(
+                      _wonReward?['title'] ?? 'Reward',
+                      style: const TextStyle(
+                        fontSize: 22,
+                        fontWeight: FontWeight.w900,
+                        color: Color(0xFF166534),
+                        fontFamily: 'Poppins',
+                      ),
+                    ),
+                    const SizedBox(height: 12),
+                    Container(
+                      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
+                      decoration: BoxDecoration(
+                        color: Colors.white,
+                        borderRadius: BorderRadius.circular(10),
+                        border: Border.all(color: const Color(0xFF86EFAC), width: 1.5),
+                      ),
+                      child: Row(
+                        mainAxisAlignment: MainAxisAlignment.center,
+                        children: [
+                          Text(
+                            _generatedCode ?? '',
+                            style: const TextStyle(
+                              fontSize: 18,
+                              fontWeight: FontWeight.w900,
+                              letterSpacing: 1.5,
+                              color: Color(0xFF1F2937),
+                              fontFamily: 'Poppins',
+                            ),
+                          ),
+                          const SizedBox(width: 10),
+                          GestureDetector(
+                            onTap: () {
+                              if (_generatedCode != null) {
+                                Clipboard.setData(ClipboardData(text: _generatedCode!));
+                                AppSnackBar.showSuccess(context, 'Coupon code copied to clipboard!');
+                              }
+                            },
+                            child: const Icon(Icons.copy_rounded, color: Color(0xFFFF6B2B), size: 20),
+                          ),
+                        ],
+                      ),
+                    ),
+                    const SizedBox(height: 12),
+                    Text(
+                      '• Applies on orders above ₹${_wonReward?['minCart'] ?? 149}\n• Valid for 24 Hours • 1-Time Use Only',
+                      textAlign: TextAlign.center,
+                      style: const TextStyle(
+                        fontSize: 11,
+                        color: Color(0xFF4B5563),
+                        height: 1.4,
+                        fontFamily: 'Poppins',
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+              const SizedBox(height: 16),
+              SizedBox(
+                width: double.infinity,
+                height: 48,
+                child: ElevatedButton(
+                  onPressed: () {
+                    if (_generatedCode != null) {
+                      Clipboard.setData(ClipboardData(text: _generatedCode!));
+                    }
+                    Navigator.pop(context);
+                    AppSnackBar.showSuccess(context, 'Coupon copied! Paste it in Cart.');
+                  },
+                  style: ElevatedButton.styleFrom(
+                    backgroundColor: const Color(0xFFFF6B2B),
+                    shape: RoundedRectangleBorder(
+                      borderRadius: BorderRadius.circular(12),
+                    ),
+                    elevation: 0,
+                  ),
+                  child: const Text(
+                    'COPY CODE & ORDER NOW 🍕',
+                    style: TextStyle(
+                      fontSize: 13,
+                      fontWeight: FontWeight.w800,
+                      color: Colors.white,
+                      fontFamily: 'Poppins',
+                    ),
+                  ),
+                ),
+              ),
+            ],
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+class _WheelPainter extends CustomPainter {
+  final List<Map<String, dynamic>> slices;
+  const _WheelPainter({required this.slices});
+
+  @override
+  void paint(Canvas canvas, Size size) {
+    final center = Offset(size.width / 2, size.height / 2);
+    final radius = size.width / 2;
+    final sweepAngle = (2 * pi) / slices.length;
+
+    for (var i = 0; i < slices.length; i++) {
+      final startAngle = i * sweepAngle;
+      final paint = Paint()
+        ..color = (slices[i]['color'] as Color).withValues(alpha: 0.9)
+        ..style = PaintingStyle.fill;
+
+      canvas.drawArc(
+        Rect.fromCircle(center: center, radius: radius),
+        startAngle,
+        sweepAngle,
+        true,
+        paint,
+      );
+
+      final borderPaint = Paint()
+        ..color = Colors.white
+        ..strokeWidth = 2
+        ..style = PaintingStyle.stroke;
+
+      canvas.drawArc(
+        Rect.fromCircle(center: center, radius: radius),
+        startAngle,
+        sweepAngle,
+        true,
+        borderPaint,
+      );
+
+      // Draw slice label text
+      final label = slices[i]['label']?.toString() ?? '';
+      if (label.isNotEmpty) {
+        final textAngle = startAngle + sweepAngle / 2;
+        final textSpan = TextSpan(
+          text: label,
+          style: const TextStyle(
+            color: Colors.white,
+            fontSize: 9.5,
+            fontWeight: FontWeight.w900,
+            fontFamily: 'Poppins',
+          ),
+        );
+        final textPainter = TextPainter(
+          text: textSpan,
+          textDirection: TextDirection.ltr,
+        );
+        textPainter.layout();
+
+        canvas.save();
+        canvas.translate(center.dx, center.dy);
+        canvas.rotate(textAngle);
+        textPainter.paint(
+          canvas,
+          Offset(radius * 0.45, -textPainter.height / 2),
+        );
+        canvas.restore();
+      }
+    }
+  }
+
+  @override
+  bool shouldRepaint(covariant CustomPainter oldDelegate) => false;
 }
 
 // ═══════════════════════════════════════════════════════════
@@ -1889,6 +4472,7 @@ class _PinnedHeaderDelegate extends SliverPersistentHeaderDelegate {
   final double headerTotalH;
   final ValueChanged<int> onPageChanged;
   final ValueChanged<_BannerData> onBannerTap;
+  final VoidCallback onCartTap;
   final VoidCallback onProfileTap;
   final VoidCallback onLocationTap;
   final VoidCallback onSearchTap;
@@ -1910,6 +4494,7 @@ class _PinnedHeaderDelegate extends SliverPersistentHeaderDelegate {
     required this.headerTotalH,
     required this.onPageChanged,
     required this.onBannerTap,
+    required this.onCartTap,
     required this.onProfileTap,
     required this.onLocationTap,
     required this.onSearchTap,
@@ -2058,6 +4643,67 @@ class _PinnedHeaderDelegate extends SliverPersistentHeaderDelegate {
                             ),
                           ),
                         ),
+                        // Cart button (next to profile button)
+                        Consumer<CartProvider>(
+                          builder: (context, cart, _) {
+                            final count = cart.totalItems;
+                            return GestureDetector(
+                              onTap: onCartTap,
+                              child: Container(
+                                width: 36,
+                                height: 36,
+                                margin: const EdgeInsets.only(right: 10),
+                                decoration: BoxDecoration(
+                                  shape: BoxShape.circle,
+                                  border: Border.all(
+                                    color: Colors.white,
+                                    width: 2,
+                                  ),
+                                  color: Colors.white.withValues(alpha: 0.2),
+                                ),
+                                child: Stack(
+                                  clipBehavior: Clip.none,
+                                  alignment: Alignment.center,
+                                  children: [
+                                    const Icon(
+                                      Icons.shopping_bag_outlined,
+                                      color: Colors.white,
+                                      size: 19,
+                                    ),
+                                    if (count > 0)
+                                      Positioned(
+                                        top: -4,
+                                        right: -4,
+                                        child: Container(
+                                          padding: const EdgeInsets.all(2),
+                                          constraints: const BoxConstraints(
+                                            minWidth: 16,
+                                            minHeight: 16,
+                                          ),
+                                          decoration: const BoxDecoration(
+                                            color: _LC.red,
+                                            shape: BoxShape.circle,
+                                          ),
+                                          child: Text(
+                                            count > 99 ? '99+' : '$count',
+                                            style: const TextStyle(
+                                              color: Colors.white,
+                                              fontSize: 9,
+                                              fontWeight: FontWeight.w800,
+                                              fontFamily: 'Poppins',
+                                              height: 1.1,
+                                            ),
+                                            textAlign: TextAlign.center,
+                                          ),
+                                        ),
+                                      ),
+                                  ],
+                                ),
+                              ),
+                            );
+                          },
+                        ),
+                        // Profile button
                         GestureDetector(
                           onTap: onProfileTap,
                           child: Container(
@@ -2066,7 +4712,7 @@ class _PinnedHeaderDelegate extends SliverPersistentHeaderDelegate {
                             decoration: BoxDecoration(
                               shape: BoxShape.circle,
                               border: Border.all(color: Colors.white, width: 2),
-                              color: Colors.white.withOpacity(0.2),
+                              color: Colors.white.withValues(alpha: 0.2),
                             ),
                             child: avatarUrl != null && avatarUrl!.isNotEmpty
                                 ? ClipOval(
@@ -2108,7 +4754,7 @@ class _PinnedHeaderDelegate extends SliverPersistentHeaderDelegate {
                           const SizedBox(width: 14),
                           Icon(
                             Icons.search_rounded,
-                            color: _LC.textMuted.withOpacity(0.7),
+                            color: _LC.textMuted.withValues(alpha: 0.7),
                             size: 18,
                           ),
                           const SizedBox(width: 8),
@@ -2152,7 +4798,7 @@ class _PinnedHeaderDelegate extends SliverPersistentHeaderDelegate {
                         decoration: BoxDecoration(
                           color: active
                               ? Colors.white
-                              : Colors.white.withOpacity(0.5),
+                              : Colors.white.withValues(alpha: 0.5),
                           borderRadius: BorderRadius.circular(3),
                         ),
                       );
@@ -2219,7 +4865,7 @@ class _TextBannerSlide extends StatelessWidget {
                       vertical: 3,
                     ),
                     decoration: BoxDecoration(
-                      color: Colors.white.withOpacity(0.22),
+                      color: Colors.white.withValues(alpha: 0.22),
                       borderRadius: BorderRadius.circular(20),
                     ),
                     child: Text(
@@ -2393,14 +5039,14 @@ class _CategoryChips extends StatelessWidget {
                   boxShadow: isSelected
                       ? [
                           BoxShadow(
-                            color: _LC.accent.withOpacity(0.20),
+                            color: _LC.accent.withValues(alpha: 0.20),
                             blurRadius: 8,
                             offset: const Offset(0, 2),
                           ),
                         ]
                       : [
                           BoxShadow(
-                            color: Colors.black.withOpacity(0.04),
+                            color: Colors.black.withValues(alpha: 0.04),
                             blurRadius: 4,
                             offset: const Offset(0, 1),
                           ),
@@ -2529,6 +5175,388 @@ class _QuickFiltersRow extends StatelessWidget {
 }
 
 // ═══════════════════════════════════════════════════════════
+// ✅ 1. Live Order Counter Section (Positioned right after Categories)
+// ═══════════════════════════════════════════════════════════
+class _LiveOrderCounterSection extends StatelessWidget {
+  final String text;
+  final int orderCount;
+  final String userArea;
+
+  const _LiveOrderCounterSection({
+    required this.text,
+    required this.orderCount,
+    required this.userArea,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final displayText = text.isNotEmpty
+        ? text
+        : '${orderCount > 0 ? orderCount : 240}+ people ordered in the last hour from $userArea! 🔥';
+
+    return Container(
+      margin: const EdgeInsets.fromLTRB(14, 8, 14, 6),
+      padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
+      decoration: BoxDecoration(
+        color: _LC.accentLight,
+        borderRadius: BorderRadius.circular(14),
+        border: Border.all(color: _LC.accentBorder, width: 1),
+        boxShadow: [
+          BoxShadow(
+            color: _LC.accent.withValues(alpha: 0.06),
+            blurRadius: 10,
+            offset: const Offset(0, 2),
+          ),
+        ],
+      ),
+      child: Row(
+        children: [
+          // Pulsing live indicator
+          Container(
+            width: 8,
+            height: 8,
+            decoration: BoxDecoration(
+              color: _LC.green,
+              shape: BoxShape.circle,
+              boxShadow: [
+                BoxShadow(
+                  color: _LC.green.withValues(alpha: 0.5),
+                  blurRadius: 6,
+                  spreadRadius: 1,
+                ),
+              ],
+            ),
+          ),
+          const SizedBox(width: 8),
+          // Flame icon badge
+          Container(
+            padding: const EdgeInsets.all(4),
+            decoration: BoxDecoration(
+              color: _LC.accent,
+              borderRadius: BorderRadius.circular(6),
+            ),
+            child: const Icon(
+              Icons.local_fire_department_rounded,
+              color: Colors.white,
+              size: 14,
+            ),
+          ),
+          const SizedBox(width: 10),
+          // Text
+          Expanded(
+            child: Text(
+              displayText,
+              style: const TextStyle(
+                fontSize: 12,
+                fontWeight: FontWeight.w700,
+                color: _LC.textPrimary,
+                fontFamily: 'Poppins',
+                height: 1.25,
+              ),
+              maxLines: 2,
+              overflow: TextOverflow.ellipsis,
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+// ═══════════════════════════════════════════════════════════
+// ✅ 2. Today's Best Deals Section (Horizontal Scrolling)
+// ═══════════════════════════════════════════════════════════
+class _TodaysDealsSection extends StatelessWidget {
+  final List<MenuItemModel> items;
+  final bool loading;
+  final void Function(MenuItemModel) onItemTap;
+  final VoidCallback? onViewAll;
+
+  const _TodaysDealsSection({
+    required this.items,
+    required this.loading,
+    required this.onItemTap,
+    this.onViewAll,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    if (!loading && items.isEmpty) return const SizedBox.shrink();
+
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Padding(
+          padding: const EdgeInsets.fromLTRB(16, 18, 16, 10),
+          child: Row(
+            children: [
+              Container(
+                width: 4,
+                height: 22,
+                decoration: BoxDecoration(
+                  color: _LC.accent,
+                  borderRadius: BorderRadius.circular(2),
+                ),
+              ),
+              const SizedBox(width: 10),
+              const Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      "Today's Best Deals 🔥",
+                      style: TextStyle(
+                        fontSize: 17,
+                        fontWeight: FontWeight.w800,
+                        color: _LC.textPrimary,
+                        fontFamily: 'Poppins',
+                      ),
+                    ),
+                    SizedBox(height: 2),
+                    Text(
+                      'Special discounts & limited stock',
+                      style: TextStyle(
+                        fontSize: 11,
+                        color: _LC.textMuted,
+                        fontFamily: 'Poppins',
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+              if (!loading && onViewAll != null)
+                GestureDetector(
+                  onTap: onViewAll,
+                  child: Container(
+                    padding: const EdgeInsets.symmetric(
+                      horizontal: 12,
+                      vertical: 5,
+                    ),
+                    decoration: BoxDecoration(
+                      color: _LC.accentLight,
+                      borderRadius: BorderRadius.circular(20),
+                      border: Border.all(color: _LC.accentBorder),
+                    ),
+                    child: const Text(
+                      'View All',
+                      style: TextStyle(
+                        color: _LC.accent,
+                        fontSize: 11,
+                        fontWeight: FontWeight.w700,
+                        fontFamily: 'Poppins',
+                      ),
+                    ),
+                  ),
+                ),
+            ],
+          ),
+        ),
+        if (loading)
+          _buildShimmer()
+        else
+          SizedBox(
+            height: 220,
+            child: ListView.builder(
+              scrollDirection: Axis.horizontal,
+              physics: const BouncingScrollPhysics(),
+              padding: const EdgeInsets.symmetric(horizontal: 12),
+              itemCount: items.length,
+              itemBuilder: (context, index) {
+                final item = items[index];
+                return Container(
+                  width: 165,
+                  margin: const EdgeInsets.symmetric(horizontal: 4),
+                  child: ExploreItemCard(
+                    item: item,
+                    imageHeight: 125,
+                    badgeText: item.dealTag ??
+                        (item.dealStockLeft != null
+                            ? '🔥 ${item.dealStockLeft} left'
+                            : null),
+                    onTap: () => onItemTap(item),
+                  ),
+                );
+              },
+            ),
+          ),
+        Container(
+          margin: const EdgeInsets.fromLTRB(16, 12, 16, 0),
+          height: 1,
+          color: _LC.border,
+        ),
+      ],
+    );
+  }
+
+  Widget _buildShimmer() {
+    return SizedBox(
+      height: 220,
+      child: ListView.builder(
+        scrollDirection: Axis.horizontal,
+        padding: const EdgeInsets.symmetric(horizontal: 12),
+        itemCount: 3,
+        itemBuilder: (_, __) => Container(
+          width: 165,
+          margin: const EdgeInsets.symmetric(horizontal: 4),
+          decoration: BoxDecoration(
+            color: const Color(0xFFEAE8E4),
+            borderRadius: BorderRadius.circular(16),
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+// ═══════════════════════════════════════════════════════════
+// ✅ 3. Trending in Haldwani Section (Horizontal with Rankings #1, #2, #3...)
+// ═══════════════════════════════════════════════════════════
+class _TrendingNowSection extends StatelessWidget {
+  final List<MenuItemModel> items;
+  final bool loading;
+  final String userArea;
+  final void Function(MenuItemModel) onItemTap;
+  final VoidCallback? onViewAll;
+
+  const _TrendingNowSection({
+    required this.items,
+    required this.loading,
+    required this.userArea,
+    required this.onItemTap,
+    this.onViewAll,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    if (!loading && items.isEmpty) return const SizedBox.shrink();
+
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Padding(
+          padding: const EdgeInsets.fromLTRB(16, 16, 16, 10),
+          child: Row(
+            children: [
+              Container(
+                width: 4,
+                height: 22,
+                decoration: BoxDecoration(
+                  color: _LC.red,
+                  borderRadius: BorderRadius.circular(2),
+                ),
+              ),
+              const SizedBox(width: 10),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      'Trending in $userArea 📈',
+                      style: const TextStyle(
+                        fontSize: 17,
+                        fontWeight: FontWeight.w800,
+                        color: _LC.textPrimary,
+                        fontFamily: 'Poppins',
+                      ),
+                    ),
+                    const SizedBox(height: 2),
+                    const Text(
+                      'Most ordered right now',
+                      style: TextStyle(
+                        fontSize: 11,
+                        color: _LC.textMuted,
+                        fontFamily: 'Poppins',
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+              if (!loading && onViewAll != null)
+                GestureDetector(
+                  onTap: onViewAll,
+                  child: Container(
+                    padding: const EdgeInsets.symmetric(
+                      horizontal: 12,
+                      vertical: 5,
+                    ),
+                    decoration: BoxDecoration(
+                      color: const Color(0xFFFEE2E2),
+                      borderRadius: BorderRadius.circular(20),
+                      border: Border.all(color: const Color(0xFFFECACA)),
+                    ),
+                    child: const Text(
+                      'View All',
+                      style: TextStyle(
+                        color: _LC.red,
+                        fontSize: 11,
+                        fontWeight: FontWeight.w700,
+                        fontFamily: 'Poppins',
+                      ),
+                    ),
+                  ),
+                ),
+            ],
+          ),
+        ),
+        if (loading)
+          _buildShimmer()
+        else
+          SizedBox(
+            height: 220,
+            child: ListView.builder(
+              scrollDirection: Axis.horizontal,
+              physics: const BouncingScrollPhysics(),
+              padding: const EdgeInsets.symmetric(horizontal: 12),
+              itemCount: items.length,
+              itemBuilder: (context, index) {
+                final item = items[index];
+                return Container(
+                  width: 165,
+                  margin: const EdgeInsets.symmetric(horizontal: 4),
+                  child: ExploreItemCard(
+                    item: item,
+                    imageHeight: 125,
+                    rank: index + 1,
+                    badgeText: item.orderCountBadge ??
+                        (index < 3
+                            ? '${150 - (index + 1) * 20}+ orders'
+                            : '🔥 Trending'),
+                    onTap: () => onItemTap(item),
+                  ),
+                );
+              },
+            ),
+          ),
+        Container(
+          margin: const EdgeInsets.fromLTRB(16, 12, 16, 0),
+          height: 1,
+          color: _LC.border,
+        ),
+      ],
+    );
+  }
+
+  Widget _buildShimmer() {
+    return SizedBox(
+      height: 220,
+      child: ListView.builder(
+        scrollDirection: Axis.horizontal,
+        padding: const EdgeInsets.symmetric(horizontal: 12),
+        itemCount: 3,
+        itemBuilder: (_, __) => Container(
+          width: 165,
+          margin: const EdgeInsets.symmetric(horizontal: 4),
+          decoration: BoxDecoration(
+            color: const Color(0xFFEAE8E4),
+            borderRadius: BorderRadius.circular(16),
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+// ═══════════════════════════════════════════════════════════
 // ✅ CHANGE 1: _RecommendedItemsSection — NEW DESIGN
 // Featured big card (pehla item) + small horizontal cards (baaki items)
 // Sab data database se hi aata hai — kuch hardcode nahi
@@ -2540,7 +5568,6 @@ class _RecommendedItemsSection extends StatelessWidget {
   final VoidCallback? onViewAll;
 
   const _RecommendedItemsSection({
-    super.key,
     required this.items,
     required this.loading,
     required this.onItemTap,
@@ -2623,7 +5650,7 @@ class _RecommendedItemsSection extends StatelessWidget {
           _buildShimmer()
         else
           SizedBox(
-            height: 260,
+            height: 220,
             child: ListView.builder(
               scrollDirection: Axis.horizontal,
               physics: const BouncingScrollPhysics(),
@@ -2631,10 +5658,11 @@ class _RecommendedItemsSection extends StatelessWidget {
               itemCount: items.length,
               itemBuilder: (context, index) {
                 return Container(
-                  width: 160,
+                  width: 165,
                   margin: const EdgeInsets.symmetric(horizontal: 4),
                   child: ExploreItemCard(
                     item: items[index],
+                    imageHeight: 125,
                     onTap: () => onItemTap(items[index]),
                   ),
                 );
@@ -2647,13 +5675,13 @@ class _RecommendedItemsSection extends StatelessWidget {
 
   Widget _buildShimmer() {
     return SizedBox(
-      height: 260,
+      height: 220,
       child: ListView.builder(
         scrollDirection: Axis.horizontal,
         padding: const EdgeInsets.symmetric(horizontal: 12),
         itemCount: 4,
         itemBuilder: (_, __) => Container(
-          width: 160,
+          width: 165,
           margin: const EdgeInsets.symmetric(horizontal: 4),
           decoration: BoxDecoration(
             color: const Color(0xFFEAE8E4),
@@ -2747,7 +5775,7 @@ class _RecommendedRestaurantsSection extends StatelessWidget {
                   decoration: BoxDecoration(
                     color: _LC.blueLight,
                     borderRadius: BorderRadius.circular(20),
-                    border: Border.all(color: _LC.blue.withOpacity(0.2)),
+                    border: Border.all(color: _LC.blue.withValues(alpha: 0.2)),
                   ),
                   child: const Text(
                     'View All',
@@ -3604,7 +6632,7 @@ class _RestaurantPromo extends StatelessWidget {
                     vertical: 3,
                   ),
                   decoration: BoxDecoration(
-                    color: Colors.white.withOpacity(0.2),
+                    color: Colors.white.withValues(alpha: 0.2),
                     borderRadius: BorderRadius.circular(6),
                   ),
                   child: const Text(
@@ -4348,7 +7376,7 @@ class _CombosHomeSection extends StatelessWidget {
                                     borderRadius: BorderRadius.circular(8),
                                     boxShadow: [
                                       BoxShadow(
-                                        color: _LC.red.withOpacity(0.4),
+                                        color: _LC.red.withValues(alpha: 0.4),
                                         blurRadius: 6,
                                         offset: const Offset(0, 2),
                                       ),
@@ -4508,7 +7536,7 @@ class _LoginPromptDialog extends StatelessWidget {
           borderRadius: BorderRadius.circular(24),
           boxShadow: [
             BoxShadow(
-              color: Colors.black.withOpacity(0.15),
+              color: Colors.black.withValues(alpha: 0.15),
               blurRadius: 32,
               offset: const Offset(0, 12),
             ),
@@ -4537,7 +7565,7 @@ class _LoginPromptDialog extends StatelessWidget {
                       color: const Color(0xFFFFF1EB),
                       shape: BoxShape.circle,
                       border: Border.all(
-                        color: const Color(0xFFFF6B35).withOpacity(0.25),
+                        color: const Color(0xFFFF6B35).withValues(alpha: 0.25),
                         width: 2,
                       ),
                     ),
@@ -4672,7 +7700,7 @@ class _ProfileAvatarState extends State<_ProfileAvatar> {
         height: 34,
         decoration: BoxDecoration(
           shape: BoxShape.circle,
-          border: Border.all(color: Colors.white.withOpacity(0.6), width: 1.5),
+          border: Border.all(color: Colors.white.withValues(alpha: 0.6), width: 1.5),
         ),
         child: ClipOval(
           child: _avatarUrl != null
@@ -4690,7 +7718,7 @@ class _ProfileAvatarState extends State<_ProfileAvatar> {
   }
 
   Widget _defaultIcon() => Container(
-    color: Colors.white.withOpacity(0.20),
+    color: Colors.white.withValues(alpha: 0.20),
     child: const Icon(Icons.person_rounded, color: Colors.white, size: 18),
   );
 }
@@ -5184,7 +8212,7 @@ class _CategoryFilterSection extends StatelessWidget {
 
 class _ComboAddButton extends StatefulWidget {
   final ComboModel combo;
-  const _ComboAddButton({Key? key, required this.combo}) : super(key: key);
+  const _ComboAddButton({required this.combo});
 
   @override
   State<_ComboAddButton> createState() => _ComboAddButtonState();

@@ -14,6 +14,8 @@ import 'package:flutter/foundation.dart' show kIsWeb;
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:provider/provider.dart';
+import 'package:geocoding/geocoding.dart'
+    if (dart.library.js_interop) '../stub/geocoding_stub.dart';
 import 'package:razorpay_flutter/razorpay_flutter.dart'
     if (dart.library.js_interop) '../services/razorpay_web_checkout.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
@@ -33,9 +35,7 @@ import 'donation_screen.dart';
 import 'location_picker_screen.dart';
 import 'address_selection_screen.dart';
 import '../constants/app_snackbar.dart';
-import '../constants/globals.dart';
 import 'dart:async' show unawaited;
-import 'package:cached_network_image/cached_network_image.dart';
 
 // ── Address mode ─────────────────────────────────────────────
 enum _AddressMode { myLocation, otherLocation }
@@ -47,7 +47,7 @@ class CheckoutScreen extends StatefulWidget {
   State<CheckoutScreen> createState() => _CheckoutScreenState();
 }
 
-class _CheckoutScreenState extends State<CheckoutScreen> {
+class _CheckoutScreenState extends State<CheckoutScreen> with WidgetsBindingObserver {
   // ── My Location (GPS) controllers ────────────────────────────
   final _addressController = TextEditingController();
   final _landmarkController = TextEditingController();
@@ -104,7 +104,8 @@ class _CheckoutScreenState extends State<CheckoutScreen> {
   List<Map<String, dynamic>> _cartOffers = [];
   List<Map<String, dynamic>> _addonItems = [];
 
-  static const double _codLimit = 199.0;
+  double _codLimit = 199.0;
+  bool _isCodEnabled = true;
   static const int _onlineDiscount = 0;
   static const double _otherPlatformDelivery = 35.0;
   static const double _otherPlatformFee = 7.0;
@@ -131,14 +132,13 @@ class _CheckoutScreenState extends State<CheckoutScreen> {
   @override
   void initState() {
     super.initState();
+    WidgetsBinding.instance.addObserver(this);
     if (!kIsWeb) {
       _razorpay = Razorpay();
       _razorpay!.on(Razorpay.EVENT_PAYMENT_SUCCESS, _onPaymentSuccess);
       _razorpay!.on(Razorpay.EVENT_PAYMENT_ERROR, _onPaymentError);
       _razorpay!.on(Razorpay.EVENT_EXTERNAL_WALLET, _onExternalWallet);
     }
-
-    CartVisibilityControl.hide();
 
     WidgetsBinding.instance.addPostFrameCallback((_) async {
       final user = _supabase.auth.currentUser;
@@ -196,6 +196,7 @@ class _CheckoutScreenState extends State<CheckoutScreen> {
         _loadDonationSettings(),
         _loadFirstOrderCoupons(),
         _loadCartOffersAndAddons(),
+        _loadPaymentAndGrowthSettings(),
       ]);
 
     });
@@ -372,13 +373,56 @@ class _CheckoutScreenState extends State<CheckoutScreen> {
     } catch (_) {}
   }
 
+  Future<void> _loadPaymentAndGrowthSettings() async {
+    try {
+      final configRes = await _supabase
+          .from('app_growth_configs')
+          .select('cod_enabled, cod_max_limit')
+          .eq('id', 'default_config')
+          .maybeSingle();
+
+      if (configRes != null && mounted) {
+        setState(() {
+          if (configRes['cod_enabled'] != null) {
+            _isCodEnabled = configRes['cod_enabled'] as bool;
+          }
+          final limit = (configRes['cod_max_limit'] as num?)?.toDouble();
+          if (limit != null && limit > 0) {
+            _codLimit = limit;
+          }
+        });
+      }
+    } catch (_) {
+      try {
+        final settingsRes = await _supabase
+            .from('app_settings')
+            .select('cod_enabled, cod_max_limit')
+            .limit(1)
+            .maybeSingle();
+        if (settingsRes != null && mounted) {
+          setState(() {
+            if (settingsRes['cod_enabled'] != null) {
+              _isCodEnabled = settingsRes['cod_enabled'] as bool;
+            }
+            final limit = (settingsRes['cod_max_limit'] as num?)?.toDouble();
+            if (limit != null && limit > 0) {
+              _codLimit = limit;
+            }
+          });
+        }
+      } catch (_) {}
+    }
+  }
+
   bool _isCodAllowed(double cartTotal) {
+    if (!_isCodEnabled) return false;
     if (cartTotal > _codLimit) return false;
     return true;
   }
 
   @override
   void dispose() {
+    WidgetsBinding.instance.removeObserver(this);
     _razorpay?.clear();
     _addressController.dispose();
     _landmarkController.dispose();
@@ -388,8 +432,17 @@ class _CheckoutScreenState extends State<CheckoutScreen> {
     _recipientPhoneController.dispose();
     _offerController.dispose();
     _nameController.dispose();
-    CartVisibilityControl.show();
     super.dispose();
+  }
+
+  @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    if (state == AppLifecycleState.resumed) {
+      _loadPaymentAndGrowthSettings();
+      if (mounted) {
+        context.read<CartProvider>().reloadSettings();
+      }
+    }
   }
 
   Future<void> _showAppClosedDialog(
@@ -399,7 +452,7 @@ class _CheckoutScreenState extends State<CheckoutScreen> {
     await showDialog(
       context: context,
       barrierDismissible: true,
-      barrierColor: Colors.black.withOpacity(0.45),
+      barrierColor: Colors.black.withValues(alpha: 0.45),
       builder: (ctx) => Dialog(
         backgroundColor: Colors.transparent,
         insetPadding: const EdgeInsets.symmetric(horizontal: 24),
@@ -424,9 +477,9 @@ class _CheckoutScreenState extends State<CheckoutScreen> {
                 height: 72,
                 decoration: BoxDecoration(
                   shape: BoxShape.circle,
-                  color: _primaryColor.withOpacity(0.08),
+                  color: _primaryColor.withValues(alpha: 0.08),
                   border: Border.all(
-                    color: _primaryColor.withOpacity(0.25),
+                    color: _primaryColor.withValues(alpha: 0.25),
                     width: 2,
                   ),
                 ),
@@ -526,14 +579,6 @@ class _CheckoutScreenState extends State<CheckoutScreen> {
     );
   }
 
-  void _onPaymentSuccessWeb(String paymentId, String orderId, String signature) {
-    _onPaymentSuccess(PaymentSuccessResponse(paymentId, orderId, signature));
-  }
-
-  void _onPaymentErrorWeb(int code, String message) {
-    _onPaymentError(PaymentFailureResponse(code, message));
-  }
-
   void _onPaymentSuccess(PaymentSuccessResponse response) async {
     debugPrint('Payment success: ${response.paymentId}');
     if (_pendingOrderId == null) return;
@@ -570,6 +615,8 @@ class _CheckoutScreenState extends State<CheckoutScreen> {
             orderId: o.id,
             vendorName: o.vendorName,
             amount: o.total.toDouble(),
+            vendorId: o.vendorId,
+            itemsCount: o.items.length,
             deliveryCharge: o.deliveryCharge.toDouble(),
           ),
         );
@@ -640,6 +687,14 @@ class _CheckoutScreenState extends State<CheckoutScreen> {
       _showPaymentLoading = false;
     });
     _snack('Payment failed. Please try again.', isError: true);
+  }
+
+  void _onPaymentSuccessWeb(String paymentId, String orderId, String signature) {
+    _onPaymentSuccess(PaymentSuccessResponse(paymentId, orderId, signature));
+  }
+
+  void _onPaymentErrorWeb(int code, String message) {
+    _onPaymentError(PaymentFailureResponse(code, message));
   }
 
   void _onExternalWallet(ExternalWalletResponse response) {
@@ -850,7 +905,7 @@ class _CheckoutScreenState extends State<CheckoutScreen> {
                   width: 36,
                   height: 36,
                   decoration: BoxDecoration(
-                    color: _primaryColor.withOpacity(0.1),
+                    color: _primaryColor.withValues(alpha: 0.1),
                     borderRadius: BorderRadius.circular(10),
                   ),
                   child: const Icon(
@@ -1275,7 +1330,9 @@ class _CheckoutScreenState extends State<CheckoutScreen> {
 
     if (_selectedPayment == 'cod' && !_isCodAllowed(cart.total)) {
       _snack(
-        'COD is only available for orders up to ₹$_codLimit. Please pay online.',
+        !_isCodEnabled
+            ? 'Cash on Delivery is currently disabled. Please pay online.'
+            : 'COD is only available for orders up to ₹${_codLimit.toStringAsFixed(0)}. Please pay online.',
         isWarning: true,
       );
       setState(() {
@@ -1432,15 +1489,36 @@ class _CheckoutScreenState extends State<CheckoutScreen> {
       final placedOrders = <OrderModel>[];
       final vendors = cart.vendors;
 
-      // ✅ v4.1: Map-selected coordinates — recipient mode mandatory hai
-      final double? orderCustomerLat =
+      // ✅ v4.1: Map-selected coordinates with auto-geocoding fallback
+      double? orderCustomerLat =
           _addressMode == _AddressMode.otherLocation
-          ? _otherPickedLat
-          : _myPickedLat;
-      final double? orderCustomerLng =
+              ? _otherPickedLat
+              : _myPickedLat;
+      double? orderCustomerLng =
           _addressMode == _AddressMode.otherLocation
-          ? _otherPickedLng
-          : _myPickedLng;
+              ? _otherPickedLng
+              : _myPickedLng;
+
+      // If user typed an address but did not open map pin, auto-resolve accurate coordinates
+      if (orderCustomerLat == null || orderCustomerLng == null) {
+        try {
+          final query = orderLandmark.isNotEmpty
+              ? '$orderAddress, $orderLandmark'
+              : orderAddress;
+          if (query.trim().isNotEmpty) {
+            List<Location> locs = [];
+            try {
+              locs = await locationFromAddress('$query, Haldwani, Uttarakhand');
+            } catch (_) {
+              locs = await locationFromAddress(query);
+            }
+            if (locs.isNotEmpty) {
+              orderCustomerLat = locs.first.latitude;
+              orderCustomerLng = locs.first.longitude;
+            }
+          }
+        } catch (_) {}
+      }
 
       for (final vendor in vendors) {
         final vendorItems = vendorGroups[vendor.id] ?? [];
@@ -2188,15 +2266,15 @@ class _CheckoutScreenState extends State<CheckoutScreen> {
                                         width: double.infinity,
                                         padding: const EdgeInsets.all(14),
                                         decoration: BoxDecoration(
-                                          color: _successColor.withOpacity(
-                                            0.07,
+                                          color: _successColor.withValues(
+                                            alpha: 0.07,
                                           ),
                                           borderRadius: BorderRadius.circular(
                                             12,
                                           ),
                                           border: Border.all(
-                                            color: _successColor.withOpacity(
-                                              0.3,
+                                            color: _successColor.withValues(
+                                              alpha: 0.3,
                                             ),
                                           ),
                                         ),
@@ -2331,7 +2409,7 @@ class _CheckoutScreenState extends State<CheckoutScreen> {
                                     Icon(
                                       Icons.lock_outline_rounded,
                                       size: 13,
-                                      color: _textMuted.withOpacity(0.7),
+                                      color: _textMuted.withValues(alpha: 0.7),
                                     ),
                                     const SizedBox(width: 6),
                                     Expanded(
@@ -2342,7 +2420,7 @@ class _CheckoutScreenState extends State<CheckoutScreen> {
                                         style: TextStyle(
                                           fontFamily: 'Poppins',
                                           fontSize: 10,
-                                          color: _textMuted.withOpacity(0.8),
+                                          color: _textMuted.withValues(alpha: 0.8),
                                         ),
                                       ),
                                     ),
@@ -2383,9 +2461,9 @@ class _CheckoutScreenState extends State<CheckoutScreen> {
               height: 88,
               decoration: BoxDecoration(
                 shape: BoxShape.circle,
-                color: const Color(0xFFFF6B35).withOpacity(0.10),
+                color: const Color(0xFFFF6B35).withValues(alpha: 0.10),
                 border: Border.all(
-                  color: const Color(0xFFFF6B35).withOpacity(0.30),
+                  color: const Color(0xFFFF6B35).withValues(alpha: 0.30),
                   width: 2,
                 ),
               ),
@@ -2400,7 +2478,7 @@ class _CheckoutScreenState extends State<CheckoutScreen> {
               child: CircularProgressIndicator(
                 color: const Color(0xFFFF6B35),
                 strokeWidth: 3.5,
-                backgroundColor: const Color(0xFFFF6B35).withOpacity(0.15),
+                backgroundColor: const Color(0xFFFF6B35).withValues(alpha: 0.15),
               ),
             ),
             const SizedBox(height: 24),
@@ -2428,10 +2506,10 @@ class _CheckoutScreenState extends State<CheckoutScreen> {
             Container(
               padding: const EdgeInsets.symmetric(horizontal: 18, vertical: 9),
               decoration: BoxDecoration(
-                color: const Color(0xFFFF6B35).withOpacity(0.08),
+                color: const Color(0xFFFF6B35).withValues(alpha: 0.08),
                 borderRadius: BorderRadius.circular(20),
                 border: Border.all(
-                  color: const Color(0xFFFF6B35).withOpacity(0.20),
+                  color: const Color(0xFFFF6B35).withValues(alpha: 0.20),
                 ),
               ),
               child: const Row(
@@ -2759,9 +2837,9 @@ class _CheckoutScreenState extends State<CheckoutScreen> {
             Container(
               padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
               decoration: BoxDecoration(
-                color: _successColor.withOpacity(0.1),
+                color: _successColor.withValues(alpha: 0.1),
                 borderRadius: BorderRadius.circular(6),
-                border: Border.all(color: _successColor.withOpacity(0.3)),
+                border: Border.all(color: _successColor.withValues(alpha: 0.3)),
               ),
               child: const Text(
                 'Verified',
@@ -2783,7 +2861,7 @@ class _CheckoutScreenState extends State<CheckoutScreen> {
       decoration: BoxDecoration(
         color: const Color(0xFFFFF7ED),
         borderRadius: BorderRadius.circular(12),
-        border: Border.all(color: _warningColor.withOpacity(0.4)),
+        border: Border.all(color: _warningColor.withValues(alpha: 0.4)),
       ),
       child: Row(
         children: [
@@ -2791,7 +2869,7 @@ class _CheckoutScreenState extends State<CheckoutScreen> {
             width: 40,
             height: 40,
             decoration: BoxDecoration(
-              color: _warningColor.withOpacity(0.1),
+              color: _warningColor.withValues(alpha: 0.1),
               borderRadius: BorderRadius.circular(10),
             ),
             child: const Icon(
@@ -2923,7 +3001,7 @@ class _CheckoutScreenState extends State<CheckoutScreen> {
                         hintText: '9876543210',
                         hintStyle: TextStyle(
                           fontFamily: 'Poppins',
-                          color: _textMuted.withOpacity(0.5),
+                          color: _textMuted.withValues(alpha: 0.5),
                           letterSpacing: 1,
                         ),
                         prefixText: '+91  ',
@@ -3014,8 +3092,8 @@ class _CheckoutScreenState extends State<CheckoutScreen> {
                         style: ElevatedButton.styleFrom(
                           backgroundColor: _primaryColor,
                           foregroundColor: Colors.white,
-                          disabledBackgroundColor: _primaryColor.withOpacity(
-                            0.5,
+                          disabledBackgroundColor: _primaryColor.withValues(
+                            alpha: 0.5,
                           ),
                           elevation: 0,
                           shape: RoundedRectangleBorder(
@@ -3057,7 +3135,7 @@ class _CheckoutScreenState extends State<CheckoutScreen> {
       decoration: BoxDecoration(
         color: const Color(0xFFFEF3C7),
         borderRadius: BorderRadius.circular(16),
-        border: Border.all(color: const Color(0xFF92400E).withOpacity(0.2)),
+        border: Border.all(color: const Color(0xFF92400E).withValues(alpha: 0.2)),
       ),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
@@ -3101,10 +3179,10 @@ class _CheckoutScreenState extends State<CheckoutScreen> {
                     vertical: 5,
                   ),
                   decoration: BoxDecoration(
-                    color: const Color(0xFFFF6B35).withOpacity(0.15),
+                    color: const Color(0xFFFF6B35).withValues(alpha: 0.15),
                     borderRadius: BorderRadius.circular(8),
                     border: Border.all(
-                      color: const Color(0xFFFF6B35).withOpacity(0.3),
+                      color: const Color(0xFFFF6B35).withValues(alpha: 0.3),
                     ),
                   ),
                   child: const Text(
@@ -3182,7 +3260,7 @@ class _CheckoutScreenState extends State<CheckoutScreen> {
                       boxShadow: isSelected
                           ? [
                               BoxShadow(
-                                color: _primaryColor.withOpacity(0.25),
+                                color: _primaryColor.withValues(alpha: 0.25),
                                 blurRadius: 6,
                                 offset: const Offset(0, 2),
                               ),
@@ -3209,9 +3287,9 @@ class _CheckoutScreenState extends State<CheckoutScreen> {
               width: double.infinity,
               padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
               decoration: BoxDecoration(
-                color: _primaryColor.withOpacity(0.08),
+                color: _primaryColor.withValues(alpha: 0.08),
                 borderRadius: BorderRadius.circular(10),
-                border: Border.all(color: _primaryColor.withOpacity(0.2)),
+                border: Border.all(color: _primaryColor.withValues(alpha: 0.2)),
               ),
               child: Row(
                 mainAxisAlignment: MainAxisAlignment.center,
@@ -3253,27 +3331,58 @@ class _CheckoutScreenState extends State<CheckoutScreen> {
 
     return Column(
       children: [
-        if (isHighValue) ...[
+        if (!_isCodEnabled) ...[
+          Container(
+            padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+            margin: const EdgeInsets.only(bottom: 12),
+            decoration: BoxDecoration(
+              color: const Color(0xFFFEF2F2),
+              borderRadius: BorderRadius.circular(12),
+              border: Border.all(color: _errorColor.withValues(alpha: 0.3)),
+            ),
+            child: const Row(
+              children: [
+                Icon(
+                  Icons.info_outline_rounded,
+                  color: _errorColor,
+                  size: 18,
+                ),
+                SizedBox(width: 10),
+                Expanded(
+                  child: Text(
+                    'Cash on Delivery is currently disabled by store. Please pay online.',
+                    style: TextStyle(
+                      fontFamily: 'Poppins',
+                      fontSize: 12,
+                      color: _errorColor,
+                      height: 1.4,
+                    ),
+                  ),
+                ),
+              ],
+            ),
+          ),
+        ] else if (isHighValue) ...[
           Container(
             padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
             margin: const EdgeInsets.only(bottom: 12),
             decoration: BoxDecoration(
               color: const Color(0xFFFFF7ED),
               borderRadius: BorderRadius.circular(12),
-              border: Border.all(color: _warningColor.withOpacity(0.4)),
+              border: Border.all(color: _warningColor.withValues(alpha: 0.4)),
             ),
-            child: const Row(
+            child: Row(
               children: [
-                Icon(
+                const Icon(
                   Icons.info_outline_rounded,
                   color: _warningColor,
                   size: 18,
                 ),
-                SizedBox(width: 10),
+                const SizedBox(width: 10),
                 Expanded(
                   child: Text(
-                    'COD is only available for orders up to ₹$_codLimit. Please pay online.',
-                    style: TextStyle(
+                    'COD is only available for orders up to ₹${_codLimit.toStringAsFixed(0)}. Please pay online.',
+                    style: const TextStyle(
                       fontFamily: 'Poppins',
                       fontSize: 12,
                       color: _textMuted,
@@ -3289,9 +3398,11 @@ class _CheckoutScreenState extends State<CheckoutScreen> {
           value: 'cod',
           icon: Icons.money_rounded,
           title: 'Cash on Delivery',
-          subtitle: codAllowed
-              ? 'Pay in cash when order arrives'
-              : 'Available for orders up to ₹$_codLimit',
+          subtitle: !_isCodEnabled
+              ? 'Currently disabled'
+              : (codAllowed
+                  ? 'Pay in cash when order arrives'
+                  : 'Available for orders up to ₹${_codLimit.toStringAsFixed(0)}'),
           badgeText: null,
           bgColor: const Color(0xFFFFFBEB),
           iconColor: _warningColor,
@@ -3330,7 +3441,9 @@ class _CheckoutScreenState extends State<CheckoutScreen> {
       onTap: disabled
           ? () => _snack(
               value == 'cod'
-                  ? 'COD not available for orders above ₹$_codLimit'
+                  ? (!_isCodEnabled
+                      ? 'Cash on Delivery is currently disabled'
+                      : 'COD not available for orders above ₹${_codLimit.toStringAsFixed(0)}')
                   : '',
               isWarning: true,
             )
@@ -3347,7 +3460,7 @@ class _CheckoutScreenState extends State<CheckoutScreen> {
             color: isSelected ? bgColor : _surfaceColor,
             borderRadius: BorderRadius.circular(14),
             border: Border.all(
-              color: isSelected ? borderColor.withOpacity(0.55) : _borderColor,
+              color: isSelected ? borderColor.withValues(alpha: 0.55) : _borderColor,
               width: isSelected ? 1.5 : 1,
             ),
           ),
@@ -3357,7 +3470,7 @@ class _CheckoutScreenState extends State<CheckoutScreen> {
                 width: 40,
                 height: 40,
                 decoration: BoxDecoration(
-                  color: isSelected ? iconColor.withOpacity(0.15) : _bgColor,
+                  color: isSelected ? iconColor.withValues(alpha: 0.15) : _bgColor,
                   borderRadius: BorderRadius.circular(10),
                 ),
                 child: Icon(
@@ -3412,7 +3525,7 @@ class _CheckoutScreenState extends State<CheckoutScreen> {
                               vertical: 2,
                             ),
                             decoration: BoxDecoration(
-                              color: _textMuted.withOpacity(0.12),
+                              color: _textMuted.withValues(alpha: 0.12),
                               borderRadius: BorderRadius.circular(6),
                             ),
                             child: const Text(
@@ -3471,14 +3584,14 @@ class _CheckoutScreenState extends State<CheckoutScreen> {
       decoration: BoxDecoration(
         gradient: LinearGradient(
           colors: [
-            _primaryColor.withOpacity(0.08),
-            const Color(0xFF16A34A).withOpacity(0.06),
+            _primaryColor.withValues(alpha: 0.08),
+            const Color(0xFF16A34A).withValues(alpha: 0.06),
           ],
           begin: Alignment.topLeft,
           end: Alignment.bottomRight,
         ),
         borderRadius: BorderRadius.circular(14),
-        border: Border.all(color: _primaryColor.withOpacity(0.25)),
+        border: Border.all(color: _primaryColor.withValues(alpha: 0.25)),
       ),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
@@ -3490,7 +3603,7 @@ class _CheckoutScreenState extends State<CheckoutScreen> {
                 width: 32,
                 height: 32,
                 decoration: BoxDecoration(
-                  color: _primaryColor.withOpacity(0.12),
+                  color: _primaryColor.withValues(alpha: 0.12),
                   borderRadius: BorderRadius.circular(9),
                 ),
                 child: const Icon(
@@ -3567,10 +3680,10 @@ class _CheckoutScreenState extends State<CheckoutScreen> {
                   decoration: BoxDecoration(
                     color: _surfaceColor,
                     borderRadius: BorderRadius.circular(10),
-                    border: Border.all(color: _primaryColor.withOpacity(0.35)),
+                    border: Border.all(color: _primaryColor.withValues(alpha: 0.35)),
                     boxShadow: [
                       BoxShadow(
-                        color: _primaryColor.withOpacity(0.08),
+                        color: _primaryColor.withValues(alpha: 0.08),
                         blurRadius: 6,
                         offset: const Offset(0, 2),
                       ),
@@ -3644,9 +3757,9 @@ class _CheckoutScreenState extends State<CheckoutScreen> {
     return Container(
       padding: const EdgeInsets.all(14),
       decoration: BoxDecoration(
-        color: _successColor.withOpacity(0.06),
+        color: _successColor.withValues(alpha: 0.06),
         borderRadius: BorderRadius.circular(12),
-        border: Border.all(color: _successColor.withOpacity(0.3)),
+        border: Border.all(color: _successColor.withValues(alpha: 0.3)),
       ),
       child: Row(
         children: [
@@ -3654,7 +3767,7 @@ class _CheckoutScreenState extends State<CheckoutScreen> {
             width: 36,
             height: 36,
             decoration: BoxDecoration(
-              color: _successColor.withOpacity(0.12),
+              color: _successColor.withValues(alpha: 0.12),
               borderRadius: BorderRadius.circular(10),
             ),
             child: const Icon(
@@ -3687,7 +3800,7 @@ class _CheckoutScreenState extends State<CheckoutScreen> {
                         vertical: 2,
                       ),
                       decoration: BoxDecoration(
-                        color: _successColor.withOpacity(0.12),
+                        color: _successColor.withValues(alpha: 0.12),
                         borderRadius: BorderRadius.circular(6),
                       ),
                       child: Text(
@@ -3722,7 +3835,7 @@ class _CheckoutScreenState extends State<CheckoutScreen> {
             child: Container(
               padding: const EdgeInsets.all(6),
               decoration: BoxDecoration(
-                color: _errorColor.withOpacity(0.08),
+                color: _errorColor.withValues(alpha: 0.08),
                 borderRadius: BorderRadius.circular(8),
               ),
               child: const Icon(
@@ -3744,7 +3857,7 @@ class _CheckoutScreenState extends State<CheckoutScreen> {
       decoration: BoxDecoration(
         color: _surfaceColor,
         borderRadius: BorderRadius.circular(12),
-        border: Border.all(color: _primaryColor.withOpacity(0.35)),
+        border: Border.all(color: _primaryColor.withValues(alpha: 0.35)),
       ),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
@@ -3771,9 +3884,9 @@ class _CheckoutScreenState extends State<CheckoutScreen> {
                     vertical: 4,
                   ),
                   decoration: BoxDecoration(
-                    color: _primaryColor.withOpacity(0.08),
+                    color: _primaryColor.withValues(alpha: 0.08),
                     borderRadius: BorderRadius.circular(8),
-                    border: Border.all(color: _primaryColor.withOpacity(0.3)),
+                    border: Border.all(color: _primaryColor.withValues(alpha: 0.3)),
                   ),
                   child: const Text(
                     'Change',
@@ -3917,13 +4030,13 @@ class _CheckoutScreenState extends State<CheckoutScreen> {
         padding: const EdgeInsets.symmetric(vertical: 12, horizontal: 14),
         decoration: BoxDecoration(
           color: hasPinSet
-              ? _successColor.withOpacity(0.08)
-              : _primaryColor.withOpacity(0.06),
+              ? _successColor.withValues(alpha: 0.08)
+              : _primaryColor.withValues(alpha: 0.06),
           borderRadius: BorderRadius.circular(12),
           border: Border.all(
             color: hasPinSet
-                ? _successColor.withOpacity(0.4)
-                : _primaryColor.withOpacity(0.3),
+                ? _successColor.withValues(alpha: 0.4)
+                : _primaryColor.withValues(alpha: 0.3),
           ),
         ),
         child: Row(
@@ -4115,7 +4228,7 @@ class _CheckoutScreenState extends State<CheckoutScreen> {
                   Icon(
                     Icons.verified_user_outlined,
                     size: 12,
-                    color: _textMuted.withOpacity(0.6),
+                    color: _textMuted.withValues(alpha: 0.6),
                   ),
                   const SizedBox(width: 5),
                   Text(
@@ -4123,7 +4236,7 @@ class _CheckoutScreenState extends State<CheckoutScreen> {
                     style: TextStyle(
                       fontFamily: 'Poppins',
                       fontSize: 10,
-                      color: _textMuted.withOpacity(0.7),
+                      color: _textMuted.withValues(alpha: 0.7),
                     ),
                   ),
                 ],
@@ -4146,7 +4259,7 @@ class _CheckoutScreenState extends State<CheckoutScreen> {
               style: ElevatedButton.styleFrom(
                 backgroundColor: _primaryColor,
                 foregroundColor: Colors.white,
-                disabledBackgroundColor: _primaryColor.withOpacity(0.5),
+                disabledBackgroundColor: _primaryColor.withValues(alpha: 0.5),
                 shape: RoundedRectangleBorder(
                   borderRadius: BorderRadius.circular(14),
                 ),

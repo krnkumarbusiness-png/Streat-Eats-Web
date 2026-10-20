@@ -11,7 +11,6 @@ import 'checkout_screen.dart';
 import 'login_screen.dart';
 import 'all_offers_screen.dart';
 import '../constants/app_snackbar.dart';
-import '../constants/globals.dart';
 import '../models/vendor_model.dart';
 
 class CartScreen extends StatefulWidget {
@@ -22,7 +21,7 @@ class CartScreen extends StatefulWidget {
   State<CartScreen> createState() => _CartScreenState();
 }
 
-class _CartScreenState extends State<CartScreen> with TickerProviderStateMixin {
+class _CartScreenState extends State<CartScreen> with TickerProviderStateMixin, WidgetsBindingObserver {
   final OfferService _offerService = OfferService();
   List<Map<String, dynamic>> _cartOffers = [];
   List<Map<String, dynamic>> _addonItems = [];
@@ -33,18 +32,26 @@ class _CartScreenState extends State<CartScreen> with TickerProviderStateMixin {
   @override
   void initState() {
     super.initState();
-    CartVisibilityControl.hide();
+    WidgetsBinding.instance.addObserver(this);
     _cartProvider = context.read<CartProvider>();
     _cartProvider.addListener(_onCartUpdated);
-    
+    _cartProvider.reloadSettings();
     _fetchOffersAndAddons();
   }
 
   @override
   void dispose() {
-    CartVisibilityControl.show();
+    WidgetsBinding.instance.removeObserver(this);
     _cartProvider.removeListener(_onCartUpdated);
     super.dispose();
+  }
+
+  @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    if (state == AppLifecycleState.resumed) {
+      _cartProvider.reloadSettings();
+      _fetchOffersAndAddons();
+    }
   }
 
   Future<void> _fetchOffersAndAddons() async {
@@ -169,13 +176,43 @@ class _CartScreenState extends State<CartScreen> with TickerProviderStateMixin {
             _buildHeader(context, cart),
 
             if (cart.isEmpty)
-              Expanded(child: _buildEmptyCart(context))
+              Expanded(
+                child: RefreshIndicator(
+                  color: AppColors.primary,
+                  onRefresh: () async {
+                    await Future.wait([
+                      _cartProvider.reloadSettings(),
+                      _fetchOffersAndAddons(),
+                    ]);
+                  },
+                  child: SingleChildScrollView(
+                    physics: const AlwaysScrollableScrollPhysics(
+                      parent: BouncingScrollPhysics(),
+                    ),
+                    child: SizedBox(
+                      height: MediaQuery.of(context).size.height * 0.7,
+                      child: _buildEmptyCart(context),
+                    ),
+                  ),
+                ),
+              )
             else ...[
               Expanded(
-                child: SingleChildScrollView(
-                  physics: const BouncingScrollPhysics(),
-                  child: Column(
-                    children: [
+                child: RefreshIndicator(
+                  color: AppColors.primary,
+                  onRefresh: () async {
+                    await Future.wait([
+                      _cartProvider.reloadSettings(),
+                      _fetchOffersAndAddons(),
+                    ]);
+                  },
+                  child: SingleChildScrollView(
+                    physics: const AlwaysScrollableScrollPhysics(
+                      parent: BouncingScrollPhysics(),
+                    ),
+                    child: Column(
+                      children: [
+                        _buildFreeDeliveryMilestoneBar(cart),
                       _buildVendorStrip(cart),
                       () {
                         final widgets = <Widget>[];
@@ -205,10 +242,10 @@ class _CartScreenState extends State<CartScreen> with TickerProviderStateMixin {
                                   vertical: 8,
                                 ),
                                 decoration: BoxDecoration(
-                                  color: AppColors.warning.withOpacity(0.08),
+                                  color: AppColors.warning.withValues(alpha: 0.08),
                                   borderRadius: BorderRadius.circular(10),
                                   border: Border.all(
-                                    color: AppColors.warning.withOpacity(0.25),
+                                    color: AppColors.warning.withValues(alpha: 0.25),
                                   ),
                                 ),
                                 child: Row(
@@ -253,12 +290,14 @@ class _CartScreenState extends State<CartScreen> with TickerProviderStateMixin {
                       }(),
                       if (_addonItems.isNotEmpty) _buildAddonSection(cart),
                       if (_cartOffers.isNotEmpty) _buildOffersSection(cart),
+                      _buildEmotionalDogDonationCard(cart),
                       _buildWhyZingooCard(),
                       _buildTipSelector(context, cart),
                       _buildBillSummary(cart),
                       const SizedBox(height: 8),
                     ],
                   ),
+                ),
                 ),
               ),
               _buildCheckoutButton(context, cart),
@@ -276,9 +315,9 @@ class _CartScreenState extends State<CartScreen> with TickerProviderStateMixin {
       margin: const EdgeInsets.fromLTRB(16, 12, 16, 0),
       padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
       decoration: BoxDecoration(
-        color: AppColors.primary.withOpacity(0.06),
+        color: AppColors.primary.withValues(alpha: 0.06),
         borderRadius: BorderRadius.circular(12),
-        border: Border.all(color: AppColors.primary.withOpacity(0.18)),
+        border: Border.all(color: AppColors.primary.withValues(alpha: 0.18)),
       ),
       child: Row(
         children: [
@@ -286,7 +325,7 @@ class _CartScreenState extends State<CartScreen> with TickerProviderStateMixin {
             width: 32,
             height: 32,
             decoration: BoxDecoration(
-              color: AppColors.primary.withOpacity(0.12),
+              color: AppColors.primary.withValues(alpha: 0.12),
               borderRadius: BorderRadius.circular(8),
             ),
             child: const Icon(
@@ -352,7 +391,7 @@ class _CartScreenState extends State<CartScreen> with TickerProviderStateMixin {
         border: const Border(bottom: BorderSide(color: AppColors.border)),
         boxShadow: [
           BoxShadow(
-            color: Colors.black.withOpacity(0.05),
+            color: Colors.black.withValues(alpha: 0.05),
             blurRadius: 8,
             offset: const Offset(0, 2),
           ),
@@ -397,78 +436,16 @@ class _CartScreenState extends State<CartScreen> with TickerProviderStateMixin {
           ),
           if (!cart.isEmpty)
             GestureDetector(
-              onTap: () {
-                HapticFeedback.lightImpact();
-                showDialog(
-                  context: context,
-                  builder: (_) => AlertDialog(
-                    backgroundColor: AppColors.surface,
-                    shape: RoundedRectangleBorder(
-                      borderRadius: BorderRadius.circular(20),
-                    ),
-                    title: const Text(
-                      'Clear Cart? 🗑️',
-                      style: TextStyle(
-                        fontFamily: 'Poppins',
-                        fontWeight: FontWeight.w700,
-                        fontSize: 18,
-                        color: AppColors.textPrimary,
-                      ),
-                    ),
-                    content: const Text(
-                      'All items will be removed. Are you sure?',
-                      style: TextStyle(
-                        fontFamily: 'Poppins',
-                        fontSize: 14,
-                        color: AppColors.textMuted,
-                        height: 1.5,
-                      ),
-                    ),
-                    actions: [
-                      TextButton(
-                        onPressed: () => Navigator.pop(context),
-                        child: const Text(
-                          'Cancel',
-                          style: TextStyle(
-                            color: AppColors.textMuted,
-                            fontFamily: 'Poppins',
-                          ),
-                        ),
-                      ),
-                      ElevatedButton(
-                        onPressed: () {
-                          context.read<CartProvider>().clearCart();
-                          Navigator.pop(context);
-                        },
-                        style: ElevatedButton.styleFrom(
-                          backgroundColor: AppColors.error,
-                          elevation: 0,
-                          shape: RoundedRectangleBorder(
-                            borderRadius: BorderRadius.circular(10),
-                          ),
-                        ),
-                        child: const Text(
-                          'Yes, Clear',
-                          style: TextStyle(
-                            color: Colors.white,
-                            fontWeight: FontWeight.w700,
-                            fontFamily: 'Poppins',
-                          ),
-                        ),
-                      ),
-                    ],
-                  ),
-                );
-              },
+              onTap: () => _showClearCartModal(context, cart),
               child: Container(
                 padding: const EdgeInsets.symmetric(
                   horizontal: 10,
                   vertical: 6,
                 ),
                 decoration: BoxDecoration(
-                  color: AppColors.error.withOpacity(0.07),
+                  color: AppColors.error.withValues(alpha: 0.07),
                   borderRadius: BorderRadius.circular(20),
-                  border: Border.all(color: AppColors.error.withOpacity(0.20)),
+                  border: Border.all(color: AppColors.error.withValues(alpha: 0.20)),
                 ),
                 child: const Row(
                   children: [
@@ -506,7 +483,7 @@ class _CartScreenState extends State<CartScreen> with TickerProviderStateMixin {
             width: 100,
             height: 100,
             decoration: BoxDecoration(
-              color: AppColors.primary.withOpacity(0.08),
+              color: AppColors.primary.withValues(alpha: 0.08),
               shape: BoxShape.circle,
             ),
             child: const Center(
@@ -559,6 +536,468 @@ class _CartScreenState extends State<CartScreen> with TickerProviderStateMixin {
     );
   }
 
+  void _showClearCartModal(BuildContext context, CartProvider cart) {
+    HapticFeedback.lightImpact();
+    showModalBottomSheet(
+      context: context,
+      backgroundColor: Colors.transparent,
+      isScrollControlled: true,
+      builder: (ctx) => Container(
+        padding: const EdgeInsets.fromLTRB(20, 12, 20, 24),
+        decoration: const BoxDecoration(
+          color: Colors.white,
+          borderRadius: BorderRadius.vertical(top: Radius.circular(28)),
+          boxShadow: [
+            BoxShadow(
+              color: Colors.black12,
+              blurRadius: 20,
+              offset: Offset(0, -5),
+            ),
+          ],
+        ),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            // Drag handle
+            Container(
+              width: 38,
+              height: 4,
+              decoration: BoxDecoration(
+                color: const Color(0xFFE2E8F0),
+                borderRadius: BorderRadius.circular(2),
+              ),
+            ),
+            const SizedBox(height: 20),
+
+            // Danger trash icon badge
+            Container(
+              width: 64,
+              height: 64,
+              decoration: BoxDecoration(
+                color: const Color(0xFFFEE2E2),
+                shape: BoxShape.circle,
+                border: Border.all(
+                  color: const Color(0xFFFECACA),
+                  width: 2,
+                ),
+              ),
+              child: const Center(
+                child: Icon(
+                  Icons.delete_sweep_rounded,
+                  color: Color(0xFFDC2626),
+                  size: 32,
+                ),
+              ),
+            ),
+            const SizedBox(height: 16),
+
+            // Title
+            const Text(
+              'Clear your cart?',
+              style: TextStyle(
+                fontFamily: 'Poppins',
+                fontWeight: FontWeight.w800,
+                fontSize: 19,
+                color: Color(0xFF0F172A),
+              ),
+            ),
+            const SizedBox(height: 8),
+
+            // Description
+            const Text(
+              'Are you sure you want to remove all items? Your selected street food delicacies will be cleared.',
+              textAlign: TextAlign.center,
+              style: TextStyle(
+                fontFamily: 'Poppins',
+                fontSize: 13,
+                color: Color(0xFF64748B),
+                height: 1.45,
+              ),
+            ),
+            const SizedBox(height: 16),
+
+            // Item summary chip
+            Container(
+              padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 9),
+              decoration: BoxDecoration(
+                color: const Color(0xFFF8FAFC),
+                borderRadius: BorderRadius.circular(12),
+                border: Border.all(color: const Color(0xFFE2E8F0)),
+              ),
+              child: Row(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  const Text('🛒', style: TextStyle(fontSize: 15)),
+                  const SizedBox(width: 8),
+                  Text(
+                    '${cart.totalItems} ${cart.totalItems == 1 ? "item" : "items"} • ₹${(cart.subtotal + cart.addonSubtotal).toStringAsFixed(0)}',
+                    style: const TextStyle(
+                      fontFamily: 'Poppins',
+                      fontWeight: FontWeight.w700,
+                      fontSize: 13,
+                      color: Color(0xFF334155),
+                    ),
+                  ),
+                ],
+              ),
+            ),
+            const SizedBox(height: 22),
+
+            // Action buttons row
+            Row(
+              children: [
+                Expanded(
+                  child: OutlinedButton(
+                    onPressed: () => Navigator.pop(ctx),
+                    style: OutlinedButton.styleFrom(
+                      padding: const EdgeInsets.symmetric(vertical: 14),
+                      side: const BorderSide(color: Color(0xFFCBD5E1), width: 1.5),
+                      shape: RoundedRectangleBorder(
+                        borderRadius: BorderRadius.circular(14),
+                      ),
+                    ),
+                    child: const Text(
+                      'Keep Items',
+                      style: TextStyle(
+                        fontFamily: 'Poppins',
+                        fontWeight: FontWeight.w700,
+                        fontSize: 14,
+                        color: Color(0xFF475569),
+                      ),
+                    ),
+                  ),
+                ),
+                const SizedBox(width: 12),
+                Expanded(
+                  child: ElevatedButton(
+                    onPressed: () {
+                      HapticFeedback.mediumImpact();
+                      cart.clearCart();
+                      Navigator.pop(ctx);
+                      AppSnackBar.showInfo(context, 'Cart has been cleared');
+                    },
+                    style: ElevatedButton.styleFrom(
+                      backgroundColor: const Color(0xFFDC2626),
+                      foregroundColor: Colors.white,
+                      elevation: 0,
+                      padding: const EdgeInsets.symmetric(vertical: 14),
+                      shape: RoundedRectangleBorder(
+                        borderRadius: BorderRadius.circular(14),
+                      ),
+                    ),
+                    child: const Row(
+                      mainAxisAlignment: MainAxisAlignment.center,
+                      children: [
+                        Icon(Icons.delete_outline_rounded, size: 18, color: Colors.white),
+                        SizedBox(width: 6),
+                        Text(
+                          'Yes, Clear',
+                          style: TextStyle(
+                            fontFamily: 'Poppins',
+                            fontWeight: FontWeight.w800,
+                            fontSize: 14,
+                            color: Colors.white,
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                ),
+              ],
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  // ── Free Delivery Milestone Bar (AOV Booster) ───────────────
+  Widget _buildFreeDeliveryMilestoneBar(CartProvider cart) {
+    if (!cart.isFreeDeliveryEnabled) return const SizedBox.shrink();
+    final threshold = cart.freeDeliveryMinAmount > 0 ? cart.freeDeliveryMinAmount : 149.0;
+    final subtotal = cart.subtotal + cart.addonSubtotal;
+    final remaining = (threshold - subtotal).clamp(0.0, double.infinity);
+    final isUnlocked = remaining <= 0;
+    final progress = (subtotal / threshold).clamp(0.0, 1.0);
+
+    return Container(
+      margin: const EdgeInsets.fromLTRB(16, 12, 16, 0),
+      padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 11),
+      decoration: BoxDecoration(
+        color: isUnlocked ? const Color(0xFFECFDF5) : const Color(0xFFFFF7ED),
+        borderRadius: BorderRadius.circular(14),
+        border: Border.all(
+          color: isUnlocked ? const Color(0xFFA7F3D0) : const Color(0xFFFED7AA),
+          width: 1.2,
+        ),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            mainAxisAlignment: MainAxisAlignment.spaceBetween,
+            children: [
+              Row(
+                children: [
+                  Icon(
+                    isUnlocked ? Icons.check_circle_rounded : Icons.delivery_dining_rounded,
+                    color: isUnlocked ? const Color(0xFF10B981) : const Color(0xFFEA580C),
+                    size: 18,
+                  ),
+                  const SizedBox(width: 8),
+                  Text(
+                    isUnlocked
+                        ? '🎉 FREE DELIVERY UNLOCKED!'
+                        : 'Add ₹${remaining.toStringAsFixed(0)} more for FREE Delivery',
+                    style: TextStyle(
+                      fontFamily: 'Poppins',
+                      fontSize: 12.5,
+                      fontWeight: FontWeight.w800,
+                      color: isUnlocked ? const Color(0xFF065F46) : const Color(0xFF9A3412),
+                    ),
+                  ),
+                ],
+              ),
+              Container(
+                padding: const EdgeInsets.symmetric(horizontal: 7, vertical: 3),
+                decoration: BoxDecoration(
+                  color: isUnlocked ? const Color(0xFF10B981) : const Color(0xFFEA580C),
+                  borderRadius: BorderRadius.circular(6),
+                ),
+                child: Text(
+                  isUnlocked ? 'SAVED ₹30' : 'SAVE ₹30',
+                  style: const TextStyle(
+                    fontFamily: 'Poppins',
+                    fontSize: 10,
+                    fontWeight: FontWeight.w800,
+                    color: Colors.white,
+                  ),
+                ),
+              ),
+            ],
+          ),
+          const SizedBox(height: 8),
+          ClipRRect(
+            borderRadius: BorderRadius.circular(6),
+            child: LinearProgressIndicator(
+              value: progress,
+              minHeight: 6,
+              backgroundColor: isUnlocked ? const Color(0xFFD1FAE5) : const Color(0xFFFFEDD5),
+              valueColor: AlwaysStoppedAnimation<Color>(
+                isUnlocked ? const Color(0xFF10B981) : const Color(0xFFF97316),
+              ),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  // ── Emotional Stray Dog Donation Card (Non-Forced) ───────────
+  Widget _buildEmotionalDogDonationCard(CartProvider cart) {
+    final currentDonation = cart.donationAmount;
+
+    return Container(
+      margin: const EdgeInsets.fromLTRB(16, 12, 16, 0),
+      padding: const EdgeInsets.all(14),
+      decoration: BoxDecoration(
+        color: const Color(0xFFFFFBEB),
+        borderRadius: BorderRadius.circular(16),
+        border: Border.all(color: const Color(0xFFFCD34D), width: 1.2),
+        boxShadow: [
+          BoxShadow(
+            color: Colors.amber.withValues(alpha: 0.08),
+            blurRadius: 10,
+            offset: const Offset(0, 3),
+          ),
+        ],
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              ClipRRect(
+                borderRadius: BorderRadius.circular(12),
+                child: CachedNetworkImage(
+                  imageUrl:
+                      'https://images.unsplash.com/photo-1543466835-00a7907e9de1?w=300&auto=format&fit=crop&q=80',
+                  width: 58,
+                  height: 58,
+                  fit: BoxFit.cover,
+                  placeholder: (_, __) => Container(
+                    width: 58,
+                    height: 58,
+                    color: const Color(0xFFFEF3C7),
+                    child: const Center(child: Text('🐕', style: TextStyle(fontSize: 26))),
+                  ),
+                  errorWidget: (_, __, ___) => Container(
+                    width: 58,
+                    height: 58,
+                    color: const Color(0xFFFEF3C7),
+                    child: const Center(child: Text('🐕', style: TextStyle(fontSize: 26))),
+                  ),
+                ),
+              ),
+              const SizedBox(width: 12),
+              const Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      'Feed a Hungry Street Pup Tonight 🐕🐾',
+                      style: TextStyle(
+                        fontFamily: 'Poppins',
+                        fontSize: 13,
+                        fontWeight: FontWeight.w800,
+                        color: Color(0xFF78350F),
+                      ),
+                    ),
+                    SizedBox(height: 3),
+                    Text(
+                      'Haldwani ke besahara bejubano ko khana khilane me madad karein. Aapka chhota sa yogdaan unhe bhookha nahi sone dega.',
+                      style: TextStyle(
+                        fontFamily: 'Poppins',
+                        fontSize: 11,
+                        color: Color(0xFF92400E),
+                        height: 1.35,
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            ],
+          ),
+          const SizedBox(height: 12),
+          // Voluntary chips
+          Wrap(
+            spacing: 8,
+            runSpacing: 6,
+            children: [
+              _buildDonationChip(
+                label: '+ ₹2 (Biscuits 🍪)',
+                amount: 2,
+                isSelected: currentDonation == 2,
+                onTap: () {
+                  HapticFeedback.lightImpact();
+                  cart.setDonation(currentDonation == 2 ? 0 : 2);
+                },
+              ),
+              _buildDonationChip(
+                label: '+ ₹5 (Milk & Roti 🥛)',
+                amount: 5,
+                isSelected: currentDonation == 5,
+                isRecommended: true,
+                onTap: () {
+                  HapticFeedback.lightImpact();
+                  cart.setDonation(currentDonation == 5 ? 0 : 5);
+                },
+              ),
+              _buildDonationChip(
+                label: '+ ₹10 (Full Meal 🍲)',
+                amount: 10,
+                isSelected: currentDonation == 10,
+                onTap: () {
+                  HapticFeedback.lightImpact();
+                  cart.setDonation(currentDonation == 10 ? 0 : 10);
+                },
+              ),
+              if (currentDonation > 0)
+                InkWell(
+                  onTap: () {
+                    HapticFeedback.lightImpact();
+                    cart.setDonation(0);
+                  },
+                  borderRadius: BorderRadius.circular(16),
+                  child: Container(
+                    padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+                    decoration: BoxDecoration(
+                      color: Colors.white,
+                      borderRadius: BorderRadius.circular(16),
+                      border: Border.all(color: const Color(0xFFCBD5E1)),
+                    ),
+                    child: const Text(
+                      '✕ Remove',
+                      style: TextStyle(
+                        fontFamily: 'Poppins',
+                        fontSize: 11,
+                        fontWeight: FontWeight.w600,
+                        color: Color(0xFF64748B),
+                      ),
+                    ),
+                  ),
+                ),
+            ],
+          ),
+          const SizedBox(height: 8),
+          const Row(
+            children: [
+              Icon(Icons.favorite_rounded, size: 12, color: Color(0xFFEF4444)),
+              SizedBox(width: 4),
+              Expanded(
+                child: Text(
+                  '100% donation goes directly to street dog feeding. Never forced, purely voluntary ❤️',
+                  style: TextStyle(
+                    fontFamily: 'Poppins',
+                    fontSize: 10,
+                    fontWeight: FontWeight.w600,
+                    color: Color(0xFFB45309),
+                  ),
+                ),
+              ),
+            ],
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildDonationChip({
+    required String label,
+    required int amount,
+    required bool isSelected,
+    bool isRecommended = false,
+    required VoidCallback onTap,
+  }) {
+    return InkWell(
+      onTap: onTap,
+      borderRadius: BorderRadius.circular(16),
+      child: AnimatedContainer(
+        duration: const Duration(milliseconds: 180),
+        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+        decoration: BoxDecoration(
+          color: isSelected
+              ? const Color(0xFFD97706)
+              : (isRecommended ? const Color(0xFFFEF3C7) : Colors.white),
+          borderRadius: BorderRadius.circular(16),
+          border: Border.all(
+            color: isSelected ? const Color(0xFFD97706) : const Color(0xFFFCD34D),
+            width: isSelected ? 1.4 : 1.0,
+          ),
+          boxShadow: isSelected
+              ? [
+                  BoxShadow(
+                    color: Colors.amber.withValues(alpha: 0.25),
+                    blurRadius: 6,
+                    offset: const Offset(0, 2),
+                  ),
+                ]
+              : null,
+        ),
+        child: Text(
+          label,
+          style: TextStyle(
+            fontFamily: 'Poppins',
+            fontSize: 11,
+            fontWeight: FontWeight.w800,
+            color: isSelected ? Colors.white : const Color(0xFF92400E),
+          ),
+        ),
+      ),
+    );
+  }
+
   // ── Why Zingoo Card ──────────────────────────────────────────
   Widget _buildWhyZingooCard() {
     return Container(
@@ -567,10 +1006,10 @@ class _CartScreenState extends State<CartScreen> with TickerProviderStateMixin {
       decoration: BoxDecoration(
         color: AppColors.surface,
         borderRadius: BorderRadius.circular(14),
-        border: Border.all(color: AppColors.primary.withOpacity(0.20)),
+        border: Border.all(color: AppColors.primary.withValues(alpha: 0.20)),
         boxShadow: [
           BoxShadow(
-            color: Colors.black.withOpacity(0.04),
+            color: Colors.black.withValues(alpha: 0.04),
             blurRadius: 8,
             offset: const Offset(0, 2),
           ),
@@ -632,7 +1071,7 @@ class _CartScreenState extends State<CartScreen> with TickerProviderStateMixin {
     }
     
     final discount = _manuallyAppliedOffer != null ? (_manuallyAppliedOffer!['discount_amount'] as num?)?.toDouble() ?? 0 : 0.0;
-    final total = (subtotal + addonSubtotal) - discount;
+    final total = (subtotal + addonSubtotal + cart.donationAmount) - discount;
 
     return Container(
       margin: const EdgeInsets.fromLTRB(16, 12, 16, 0),
@@ -643,7 +1082,7 @@ class _CartScreenState extends State<CartScreen> with TickerProviderStateMixin {
         border: Border.all(color: AppColors.border),
         boxShadow: [
           BoxShadow(
-            color: Colors.black.withOpacity(0.04),
+            color: Colors.black.withValues(alpha: 0.04),
             blurRadius: 12,
             offset: const Offset(0, 4),
           ),
@@ -670,6 +1109,10 @@ class _CartScreenState extends State<CartScreen> with TickerProviderStateMixin {
           if (discount > 0) ...[
             const SizedBox(height: 8),
             _summaryRow('Item Discount', '-₹${discount.toStringAsFixed(2)}', valueColor: AppColors.success),
+          ],
+          if (cart.donationAmount > 0) ...[
+            const SizedBox(height: 8),
+            _summaryRow('Stray Dog Feeding 🐾', '₹${cart.donationAmount}', valueColor: AppColors.warning),
           ],
           const Divider(height: 24, color: AppColors.border),
           Row(
@@ -763,13 +1206,13 @@ class _CartScreenState extends State<CartScreen> with TickerProviderStateMixin {
                   borderRadius: BorderRadius.circular(12),
                   boxShadow: [
                     BoxShadow(
-                      color: Colors.black.withOpacity(0.05),
+                      color: Colors.black.withValues(alpha: 0.05),
                       blurRadius: 6,
                       offset: const Offset(0, 2),
                     ),
                   ],
                   border: Border.all(
-                    color: AppColors.primary.withOpacity(0.1),
+                    color: AppColors.primary.withValues(alpha: 0.1),
                     width: 0.8,
                   ),
                 ),
@@ -789,20 +1232,20 @@ class _CartScreenState extends State<CartScreen> with TickerProviderStateMixin {
                                 imageUrl: imageUrl,
                                 fit: BoxFit.cover, // Fixed height and box fit
                                 placeholder: (_, __) => Container(
-                                  color: AppColors.primary.withOpacity(0.06),
+                                  color: AppColors.primary.withValues(alpha: 0.06),
                                   child: const Center(
                                     child: Text('🍟', style: TextStyle(fontSize: 24)),
                                   ),
                                 ),
                                 errorWidget: (_, __, ___) => Container(
-                                  color: AppColors.primary.withOpacity(0.06),
+                                  color: AppColors.primary.withValues(alpha: 0.06),
                                   child: const Center(
                                     child: Text('🍟', style: TextStyle(fontSize: 24)),
                                   ),
                                 ),
                               )
                             : Container(
-                                color: AppColors.primary.withOpacity(0.06),
+                                color: AppColors.primary.withValues(alpha: 0.06),
                                 child: const Center(
                                   child: Text('🍟', style: TextStyle(fontSize: 24)),
                                 ),
@@ -867,10 +1310,10 @@ class _CartScreenState extends State<CartScreen> with TickerProviderStateMixin {
                           : Container(
                               height: 28,
                               decoration: BoxDecoration(
-                                color: AppColors.success.withOpacity(0.08),
+                                color: AppColors.success.withValues(alpha: 0.08),
                                 borderRadius: BorderRadius.circular(8),
                                 border: Border.all(
-                                  color: AppColors.success.withOpacity(0.3),
+                                  color: AppColors.success.withValues(alpha: 0.3),
                                 ),
                               ),
                               child: Row(
@@ -971,7 +1414,7 @@ class _CartScreenState extends State<CartScreen> with TickerProviderStateMixin {
                 child: Container(
                   padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
                   decoration: BoxDecoration(
-                    color: AppColors.primary.withOpacity(0.1),
+                    color: AppColors.primary.withValues(alpha: 0.1),
                     borderRadius: BorderRadius.circular(20),
                   ),
                   child: const Text(
@@ -1038,7 +1481,7 @@ class _CartScreenState extends State<CartScreen> with TickerProviderStateMixin {
                              border: isApplied ? Border.all(color: AppColors.success, width: 2) : null,
                              boxShadow: [
                                BoxShadow(
-                                 color: Colors.black.withOpacity(0.05),
+                                 color: Colors.black.withValues(alpha: 0.05),
                                  blurRadius: 4,
                                  offset: const Offset(0, 2),
                                ),
@@ -1198,7 +1641,7 @@ class _CartScreenState extends State<CartScreen> with TickerProviderStateMixin {
                 width: 64,
                 height: 64,
                 decoration: BoxDecoration(
-                  color: AppColors.warning.withOpacity(0.12),
+                  color: AppColors.warning.withValues(alpha: 0.12),
                   shape: BoxShape.circle,
                 ),
                 child: const Icon(
@@ -1295,7 +1738,7 @@ class _CartScreenState extends State<CartScreen> with TickerProviderStateMixin {
       }
     }
     final discount = _manuallyAppliedOffer != null ? (_manuallyAppliedOffer!['discount_amount'] as num?)?.toDouble() ?? 0 : 0.0;
-    final total = (subtotal + addonSubtotal + cart.tipAmount) - discount;
+    final total = (subtotal + addonSubtotal + cart.tipAmount + cart.donationAmount) - discount;
 
     return Container(
       padding: const EdgeInsets.fromLTRB(16, 10, 16, 16),
@@ -1304,7 +1747,7 @@ class _CartScreenState extends State<CartScreen> with TickerProviderStateMixin {
         border: const Border(top: BorderSide(color: AppColors.border)),
         boxShadow: [
           BoxShadow(
-            color: Colors.black.withOpacity(0.06),
+            color: Colors.black.withValues(alpha: 0.06),
             blurRadius: 12,
             offset: const Offset(0, -4),
           ),
@@ -1345,7 +1788,7 @@ class _CartScreenState extends State<CartScreen> with TickerProviderStateMixin {
                     vertical: 4,
                   ),
                   decoration: BoxDecoration(
-                    color: Colors.white.withOpacity(0.2),
+                    color: Colors.white.withValues(alpha: 0.2),
                     borderRadius: BorderRadius.circular(8),
                   ),
                   child: Text(
@@ -1389,10 +1832,10 @@ class _CartScreenState extends State<CartScreen> with TickerProviderStateMixin {
       decoration: BoxDecoration(
         color: AppColors.surface,
         borderRadius: BorderRadius.circular(14),
-        border: Border.all(color: AppColors.primary.withOpacity(0.20)),
+        border: Border.all(color: AppColors.primary.withValues(alpha: 0.20)),
         boxShadow: [
           BoxShadow(
-            color: Colors.black.withOpacity(0.04),
+            color: Colors.black.withValues(alpha: 0.04),
             blurRadius: 8,
             offset: const Offset(0, 2),
           ),
@@ -1475,9 +1918,9 @@ class _CartScreenState extends State<CartScreen> with TickerProviderStateMixin {
               width: double.infinity,
               padding: const EdgeInsets.symmetric(vertical: 8, horizontal: 12),
               decoration: BoxDecoration(
-                color: AppColors.success.withOpacity(0.07),
+                color: AppColors.success.withValues(alpha: 0.07),
                 borderRadius: BorderRadius.circular(8),
-                border: Border.all(color: AppColors.success.withOpacity(0.25)),
+                border: Border.all(color: AppColors.success.withValues(alpha: 0.25)),
               ),
               child: Row(
                 mainAxisAlignment: MainAxisAlignment.center,
@@ -1576,7 +2019,7 @@ class _CartItemTile extends StatelessWidget {
         border: Border.all(color: AppColors.border),
         boxShadow: [
           BoxShadow(
-            color: Colors.black.withOpacity(0.04),
+            color: Colors.black.withValues(alpha: 0.04),
             blurRadius: 8,
             offset: const Offset(0, 2),
           ),
@@ -1629,7 +2072,7 @@ class _CartItemTile extends StatelessWidget {
                       vertical: 2,
                     ),
                     decoration: BoxDecoration(
-                      color: AppColors.primary.withOpacity(0.08),
+                      color: AppColors.primary.withValues(alpha: 0.08),
                       borderRadius: BorderRadius.circular(6),
                     ),
                     child: Text(
@@ -1695,8 +2138,8 @@ class _CartItemTile extends StatelessWidget {
                     _QtyButton(
                       icon: Icons.remove,
                       color: AppColors.error,
-                      bgColor: AppColors.error.withOpacity(0.07),
-                      borderColor: AppColors.error.withOpacity(0.2),
+                      bgColor: AppColors.error.withValues(alpha: 0.07),
+                      borderColor: AppColors.error.withValues(alpha: 0.2),
                       onTap: () {
                         HapticFeedback.lightImpact();
                         cart.removeItem(
@@ -1721,8 +2164,8 @@ class _CartItemTile extends StatelessWidget {
                     _QtyButton(
                       icon: Icons.add,
                       color: AppColors.primary,
-                      bgColor: AppColors.primary.withOpacity(0.08),
-                      borderColor: AppColors.primary.withOpacity(0.2),
+                      bgColor: AppColors.primary.withValues(alpha: 0.08),
+                      borderColor: AppColors.primary.withValues(alpha: 0.2),
                       onTap: () {
                         HapticFeedback.lightImpact();
                         CartUtils.handleCartAddItem(
@@ -1834,7 +2277,7 @@ class _CartItemTile extends StatelessWidget {
     }
 
     return Container(
-      color: AppColors.primary.withOpacity(0.06),
+      color: AppColors.primary.withValues(alpha: 0.06),
       child: Center(child: Text(emoji, style: const TextStyle(fontSize: 30))),
     );
   }
@@ -1920,7 +2363,7 @@ class _OfferAppliedDialogState extends State<_OfferAppliedDialog> with SingleTic
           borderRadius: BorderRadius.circular(24),
           boxShadow: [
             BoxShadow(
-              color: Colors.black.withOpacity(0.1),
+              color: Colors.black.withValues(alpha: 0.1),
               blurRadius: 20,
               offset: const Offset(0, 10),
             ),
@@ -1935,7 +2378,7 @@ class _OfferAppliedDialogState extends State<_OfferAppliedDialog> with SingleTic
               width: 64,
               height: 64,
               decoration: BoxDecoration(
-                color: AppColors.success.withOpacity(0.15),
+                color: AppColors.success.withValues(alpha: 0.15),
                 shape: BoxShape.circle,
               ),
               child: const Icon(

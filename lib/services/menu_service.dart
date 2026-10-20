@@ -64,6 +64,135 @@ class MenuService {
     }
   }
 
+  // ✅ Home Screen "Today's Best Deals" section ke liye (Admin controlled)
+  Future<List<MenuItemModel>> getTodaysDeals() async {
+    try {
+      final data = await _client
+          .from('menu_items')
+          .select()
+          .eq('is_todays_deal', true)
+          .eq('is_available', true)
+          .order('created_at', ascending: false)
+          .limit(15);
+
+      final items = (data as List).map((e) => MenuItemModel.fromMap(e)).toList();
+      if (items.isNotEmpty) return items;
+    } catch (_) {}
+
+    // Fallback: If no is_todays_deal is flagged yet, show top discounted items
+    try {
+      final data = await _client
+          .from('menu_items')
+          .select()
+          .eq('is_discounted', true)
+          .eq('is_available', true)
+          .order('app_price', ascending: true)
+          .limit(10);
+
+      return (data as List).map((e) => MenuItemModel.fromMap(e)).toList();
+    } catch (_) {
+      return [];
+    }
+  }
+
+  // ✅ Home Screen "Trending in Haldwani" section ke liye (Admin controlled)
+  Future<List<MenuItemModel>> getTrendingItems() async {
+    try {
+      final data = await _client
+          .from('menu_items')
+          .select()
+          .eq('is_trending', true)
+          .eq('is_available', true)
+          .order('trending_rank', ascending: true)
+          .limit(15);
+
+      final items = (data as List).map((e) => MenuItemModel.fromMap(e)).toList();
+      if (items.isNotEmpty) return items;
+    } catch (_) {}
+
+    // Fallback: If no items are flagged as is_trending, use recent available items
+    try {
+      final data = await _client
+          .from('menu_items')
+          .select()
+          .eq('is_available', true)
+          .order('created_at', ascending: false)
+          .limit(10);
+
+      return (data as List).map((e) => MenuItemModel.fromMap(e)).toList();
+    } catch (_) {
+      return [];
+    }
+  }
+
+  // ✅ Street Food Screen Trending Items
+  Future<List<MenuItemModel>> getTrendingStreetFoodItems() async {
+    try {
+      final data = await _client
+          .from('menu_items')
+          .select('*, vendors!inner(business_type, is_active)')
+          .eq('vendors.business_type', 'street_food')
+          .eq('vendors.is_active', true)
+          .eq('is_available', true)
+          .order('is_trending', ascending: false)
+          .order('trending_rank', ascending: true)
+          .limit(15);
+
+      final items =
+          (data as List).map((e) => MenuItemModel.fromMap(e)).toList();
+      if (items.isNotEmpty) return items;
+    } catch (_) {}
+
+    // Fallback: fetch any available street food items
+    try {
+      final data = await _client
+          .from('menu_items')
+          .select('*, vendors!inner(business_type, is_active)')
+          .eq('vendors.business_type', 'street_food')
+          .eq('vendors.is_active', true)
+          .eq('is_available', true)
+          .limit(10);
+
+      return (data as List).map((e) => MenuItemModel.fromMap(e)).toList();
+    } catch (_) {
+      return [];
+    }
+  }
+
+  // ✅ Sweets Screen Trending Items
+  Future<List<MenuItemModel>> getTrendingSweetsItems() async {
+    try {
+      final data = await _client
+          .from('menu_items')
+          .select('*, vendors!inner(business_type, is_active)')
+          .eq('vendors.business_type', 'sweets')
+          .eq('vendors.is_active', true)
+          .eq('is_available', true)
+          .order('is_trending', ascending: false)
+          .order('trending_rank', ascending: true)
+          .limit(15);
+
+      final items =
+          (data as List).map((e) => MenuItemModel.fromMap(e)).toList();
+      if (items.isNotEmpty) return items;
+    } catch (_) {}
+
+    // Fallback: fetch any available sweets items
+    try {
+      final data = await _client
+          .from('menu_items')
+          .select('*, vendors!inner(business_type, is_active)')
+          .eq('vendors.business_type', 'sweets')
+          .eq('vendors.is_active', true)
+          .eq('is_available', true)
+          .limit(10);
+
+      return (data as List).map((e) => MenuItemModel.fromMap(e)).toList();
+    } catch (_) {
+      return [];
+    }
+  }
+
   // Category wise filter (local — no DB call)
   List<MenuItemModel> filterByCategory(
     List<MenuItemModel> items,

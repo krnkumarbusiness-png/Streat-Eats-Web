@@ -43,9 +43,16 @@ class MenuItemModel {
   final String? upsellType;
 
   // ✅ NEW v5.0: Direct item IDs for upsell popup
-  // Admin jab koi item select karta hai "Show in popup" ke liye
-  // unke IDs yahan store hote hain
   final List<String> upsellItemIds;
+
+  // ✅ NEW v6.0: Today's Best Deals & Trending items fields (Admin controlled)
+  final bool isTodaysDeal;
+  final int? dealStockLeft;
+  final int? dealSoldPercent;
+  final String? dealTag;
+  final bool isTrending;
+  final int? trendingRank;
+  final String? orderCountBadge;
 
   MenuItemModel({
     required this.id,
@@ -80,6 +87,13 @@ class MenuItemModel {
     this.upsellPopupMessage,
     this.upsellType,
     this.upsellItemIds = const [],
+    this.isTodaysDeal = false,
+    this.dealStockLeft,
+    this.dealSoldPercent,
+    this.dealTag,
+    this.isTrending = false,
+    this.trendingRank,
+    this.orderCountBadge,
   });
 
   // ✅ Helper: kya is item ka upsell popup dikhana chahiye?
@@ -149,6 +163,13 @@ class MenuItemModel {
       upsellPopupMessage: map['upsell_popup_message'] as String?,
       upsellType: map['upsell_type'] as String?,
       upsellItemIds: parseUpsellIds(map['upsell_item_ids']),
+      isTodaysDeal: map['is_todays_deal'] as bool? ?? false,
+      dealStockLeft: (map['deal_stock_left'] as num?)?.toInt(),
+      dealSoldPercent: (map['deal_sold_percent'] as num?)?.toInt(),
+      dealTag: map['deal_tag'] as String?,
+      isTrending: map['is_trending'] as bool? ?? false,
+      trendingRank: (map['trending_rank'] as num?)?.toInt(),
+      orderCountBadge: map['order_count_badge'] as String?,
     );
   }
 
@@ -186,6 +207,13 @@ class MenuItemModel {
       'upsell_popup_message': upsellPopupMessage,
       'upsell_type': upsellType,
       'upsell_item_ids': upsellItemIds,
+      'is_todays_deal': isTodaysDeal,
+      'deal_stock_left': dealStockLeft,
+      'deal_sold_percent': dealSoldPercent,
+      'deal_tag': dealTag,
+      'is_trending': isTrending,
+      'trending_rank': trendingRank,
+      'order_count_badge': orderCountBadge,
     };
   }
 }

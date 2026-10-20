@@ -22,8 +22,11 @@ import '../services/order_service.dart';
 import '../services/menu_service.dart'; // ✅ FIX 1 — import added
 import 'vendor_detail_screen.dart';
 import 'search_screen.dart';
+import 'menu_item_detail_screen.dart';
+import 'all_recommended_screen.dart';
 import '../widgets/vendor_card.dart';
 import '../widgets/disclaimer_widget.dart';
+import '../widgets/explore_item_card.dart';
 
 class _LC {
   static const background = Color(0xFFF7F5F2);
@@ -65,8 +68,14 @@ class _StreetFoodScreenState extends State<StreetFoodScreen>
   bool _isLoading = true;
   String _selectedCategory = 'All';
 
-  // ✅ FIX 3 — menu items map for SearchScreen
+  // ✅ Menu items map for Explore Menu style display & SearchScreen
   Map<String, List<MenuItemModel>> _menuItemsMap = {};
+
+  // ✅ Today's Trending items (Admin controlled)
+  List<MenuItemModel> _trendingItems = [];
+  bool _loadingTrending = true;
+  bool _isTrendingEnabled = true;
+  Map<String, int> _adminVendorSortOrders = {};
 
   bool? _locationGranted;
   bool _locationServiceEnabled = true;
@@ -327,6 +336,7 @@ class _StreetFoodScreenState extends State<StreetFoodScreen>
       _userPosition = await _locationService.getCurrentLocation();
     }
     await _loadVendors();
+    await _loadTrendingItems();
 
     final pendingCat = widget.selectedCategoryNotifier?.value ?? 'All';
     if (pendingCat != 'All' && mounted) {
@@ -334,10 +344,53 @@ class _StreetFoodScreenState extends State<StreetFoodScreen>
     }
   }
 
+  Future<void> _loadTrendingItems() async {
+    try {
+      final items = await _menuService.getTrendingStreetFoodItems();
+      if (mounted) {
+        setState(() {
+          _trendingItems = items;
+          _loadingTrending = false;
+        });
+      }
+    } catch (_) {
+      if (mounted) setState(() => _loadingTrending = false);
+    }
+  }
+
   Future<void> _loadVendors() async {
     if (!mounted) return;
     setState(() => _isLoading = true);
     try {
+      // 1. Fetch sort orders & trending toggle from app_settings
+      Map<String, int> sortOrders = {};
+      try {
+        final settings = await _supabase
+            .from('app_settings')
+            .select(
+              'street_food_vendor_order, street_food_sort_orders, is_street_food_trending_enabled',
+            )
+            .limit(1)
+            .maybeSingle();
+
+        if (settings != null) {
+          final isTrend = settings['is_street_food_trending_enabled'];
+          if (isTrend != null) {
+            _isTrendingEnabled = isTrend as bool;
+          }
+
+          final orderList = settings['street_food_vendor_order'];
+          if (orderList is List) {
+            for (int idx = 0; idx < orderList.length; idx++) {
+              sortOrders[orderList[idx].toString()] = idx;
+            }
+          }
+        }
+      } catch (_) {}
+
+      _adminVendorSortOrders = sortOrders;
+
+      // 2. Fetch Street Food Vendors
       final vendors = await _vendorService.getStreetFoodVendors();
 
       if (_userPosition != null) {
@@ -351,10 +404,23 @@ class _StreetFoodScreenState extends State<StreetFoodScreen>
           v.distanceKm = dist;
           v.deliveryMinutes = _locationService.getDeliveryMinutes(dist);
         }
-        vendors.sort(
-          (a, b) => (a.distanceKm ?? 99).compareTo(b.distanceKm ?? 99),
-        );
       }
+
+      // Sort with Admin priority first, then distance
+      vendors.sort((a, b) {
+        final orderA =
+            _adminVendorSortOrders[a.id] ?? _adminVendorSortOrders[a.name];
+        final orderB =
+            _adminVendorSortOrders[b.id] ?? _adminVendorSortOrders[b.name];
+        if (orderA != null && orderB != null) {
+          return orderA.compareTo(orderB);
+        } else if (orderA != null) {
+          return -1;
+        } else if (orderB != null) {
+          return 1;
+        }
+        return (a.distanceKm ?? 99).compareTo(b.distanceKm ?? 99);
+      });
 
       // Build unique category set from vendor data
       final Set<String> vendorCategorySet = {};
@@ -387,9 +453,7 @@ class _StreetFoodScreenState extends State<StreetFoodScreen>
         for (final r in (imgRows as List)) {
           catImages[r['name'] as String] = r['image_url'] as String?;
         }
-      } catch (_) {
-        // emoji fallback chalega
-      }
+      } catch (_) {}
 
       // String list ko Map list mein convert karo with images
       final List<Map<String, dynamic>> mergedMaps = merged
@@ -402,7 +466,7 @@ class _StreetFoodScreenState extends State<StreetFoodScreen>
           )
           .toList();
 
-      // ✅ FIX 4 — Saare menu items grouped by vendorId fetch karo
+      // Saare menu items grouped by vendorId fetch karo
       Map<String, List<MenuItemModel>> menuMap = {};
       try {
         menuMap = await _menuService.fetchAllMenuItemsGrouped();
@@ -414,7 +478,7 @@ class _StreetFoodScreenState extends State<StreetFoodScreen>
       setState(() {
         _allVendors = vendors;
         _categories = mergedMaps;
-        _menuItemsMap = menuMap; // ✅ FIX 5 — state mein set karo
+        _menuItemsMap = menuMap;
         _filteredVendors = _selectedCategory == 'All'
             ? vendors
             : vendors
@@ -448,6 +512,32 @@ class _StreetFoodScreenState extends State<StreetFoodScreen>
     });
   }
 
+  void _openVendorDetail(VendorModel v) {
+    HapticFeedback.lightImpact();
+    if (v.distanceKm != null && v.distanceKm! > 0) {
+      context.read<CartProvider>().setDeliveryChargeForDistance(v.distanceKm!);
+    }
+    Navigator.push(
+      context,
+      MaterialPageRoute(builder: (_) => VendorDetailScreen(vendor: v)),
+    );
+  }
+
+  void _openItemDetail(MenuItemModel item, VendorModel vendor) {
+    HapticFeedback.lightImpact();
+    if (vendor.distanceKm != null && vendor.distanceKm! > 0) {
+      context.read<CartProvider>().setDeliveryChargeForDistance(
+        vendor.distanceKm!,
+      );
+    }
+    Navigator.push(
+      context,
+      MaterialPageRoute(
+        builder: (_) => MenuItemDetailScreen(item: item, vendor: vendor),
+      ),
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     final topPadding = MediaQuery.of(context).padding.top;
@@ -465,20 +555,21 @@ class _StreetFoodScreenState extends State<StreetFoodScreen>
           await _checkAppTiming();
           await context.read<CartProvider>().reloadSettings();
           await _loadVendors();
+          await _loadTrendingItems();
         },
         color: _LC.accent,
         backgroundColor: _LC.surface,
         child: CustomScrollView(
           physics: const BouncingScrollPhysics(),
           slivers: [
-            // ── Sticky Header ──────────────────────────────
+            // ── Sticky Header (Clean White Style Matching Meals/Sweets) ──
             SliverPersistentHeader(
               pinned: true,
               delegate: _StreetFoodHeaderDelegate(
                 isAppActive: _isAppActive,
                 allVendors: _allVendors,
                 topPadding: topPadding,
-                menuItemsMap: _menuItemsMap, // ✅ FIX 6 — pass karo
+                menuItemsMap: _menuItemsMap,
               ),
             ),
 
@@ -491,13 +582,17 @@ class _StreetFoodScreenState extends State<StreetFoodScreen>
                 ),
               ),
 
-            // Categories
+            // Categories Section
             SliverToBoxAdapter(child: _buildCategoriesSection()),
+
+            // ── Today's Trending Section (BEFORE Vendors Near You) ──
+            if (_isAppActive && _isTrendingEnabled && _trendingItems.isNotEmpty)
+              SliverToBoxAdapter(child: _buildTrendingSection()),
 
             // Vendor section header
             SliverToBoxAdapter(child: _buildVendorSectionHeader()),
 
-            // Vendors
+            // Vendors Explore-Menu List
             if (!_isAppActive)
               SliverToBoxAdapter(
                 child: _ClosedInlineWidget(openTime: _openTime),
@@ -507,31 +602,7 @@ class _StreetFoodScreenState extends State<StreetFoodScreen>
             else if (_filteredVendors.isEmpty)
               SliverToBoxAdapter(child: _buildEmptyState())
             else
-              SliverPadding(
-                padding: const EdgeInsets.only(bottom: 32),
-                sliver: SliverList(
-                  delegate: SliverChildBuilderDelegate((_, i) {
-                    final v = _filteredVendors[i];
-                    return VendorCard(
-                      vendor: v,
-                      onTap: () {
-                        if (v.distanceKm != null && v.distanceKm! > 0) {
-                          context
-                              .read<CartProvider>()
-                              .setDeliveryChargeForDistance(v.distanceKm!);
-                        }
-                        Navigator.push(
-                          context,
-                          MaterialPageRoute(
-                            builder: (_) => VendorDetailScreen(vendor: v),
-                          ),
-                        );
-                      },
-                      layout: 'list',
-                    );
-                  }, childCount: _filteredVendors.length),
-                ),
-              ),
+              ..._buildVendorExploreSlivers(),
 
             const SliverToBoxAdapter(child: SizedBox(height: 16)),
             const SliverToBoxAdapter(child: DisclaimerWidget()),
@@ -539,6 +610,114 @@ class _StreetFoodScreenState extends State<StreetFoodScreen>
           ],
         ),
       ),
+    );
+  }
+
+  Widget _buildTrendingSection() {
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Padding(
+          padding: const EdgeInsets.fromLTRB(16, 12, 16, 8),
+          child: Row(
+            mainAxisAlignment: MainAxisAlignment.spaceBetween,
+            children: [
+              Row(
+                children: const [
+                  Text(
+                    '🔥 Today\'s Trending',
+                    style: TextStyle(
+                      fontSize: 16,
+                      fontWeight: FontWeight.w800,
+                      color: _LC.textPrimary,
+                      fontFamily: 'Poppins',
+                    ),
+                  ),
+                ],
+              ),
+              InkWell(
+                onTap: () {
+                  HapticFeedback.lightImpact();
+                  Navigator.push(
+                    context,
+                    MaterialPageRoute(
+                      builder: (_) => AllRecommendedScreen(
+                        title: "Today's Trending",
+                        emoji: "🔥",
+                        subtitle: "Popular street food picks in Haldwani",
+                        preloadedItems: _trendingItems,
+                        fetchType: 'trending',
+                      ),
+                    ),
+                  );
+                },
+                borderRadius: BorderRadius.circular(12),
+                child: Padding(
+                  padding:
+                      const EdgeInsets.symmetric(horizontal: 6, vertical: 4),
+                  child: Row(
+                    mainAxisSize: MainAxisSize.min,
+                    children: const [
+                      Text(
+                        'View All',
+                        style: TextStyle(
+                          fontSize: 12,
+                          fontWeight: FontWeight.w700,
+                          color: _LC.accent,
+                          fontFamily: 'Poppins',
+                        ),
+                      ),
+                      SizedBox(width: 3),
+                      Icon(
+                        Icons.arrow_forward_ios_rounded,
+                        size: 11,
+                        color: _LC.accent,
+                      ),
+                    ],
+                  ),
+                ),
+              ),
+            ],
+          ),
+        ),
+        SizedBox(
+          height: 220,
+          child: ListView.builder(
+            scrollDirection: Axis.horizontal,
+            padding: const EdgeInsets.symmetric(horizontal: 12),
+            physics: const BouncingScrollPhysics(),
+            itemCount: _trendingItems.length,
+            itemBuilder: (ctx, i) {
+              final item = _trendingItems[i];
+              final vendor = _allVendors.where((v) => v.id == item.vendorId).firstOrNull ??
+                  VendorModel(
+                    id: item.vendorId,
+                    name: item.vendorName,
+                    area: 'Haldwani',
+                    phone: '',
+                    city: 'Haldwani',
+                    latitude: 0,
+                    longitude: 0,
+                    category: item.category,
+                    timing: '',
+                    isActive: true,
+                  );
+
+              return Container(
+                width: 155,
+                margin: const EdgeInsets.symmetric(horizontal: 4),
+                child: ExploreItemCard(
+                  item: item,
+                  onTap: () => _openItemDetail(item, vendor),
+                  rank: i + 1,
+                  badgeText: i < 3 ? 'Trending #${i + 1}' : null,
+                ),
+              );
+            },
+          ),
+        ),
+        const SizedBox(height: 8),
+      ],
     );
   }
 
@@ -642,59 +821,385 @@ class _StreetFoodScreenState extends State<StreetFoodScreen>
   }
 
   Widget _buildVendorSectionHeader() {
-    return Padding(
-      padding: const EdgeInsets.fromLTRB(16, 8, 16, 10),
+    return Container(
+      margin: const EdgeInsets.fromLTRB(14, 16, 14, 8),
+      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
+      decoration: BoxDecoration(
+        color: _LC.surface,
+        borderRadius: BorderRadius.circular(16),
+        border: Border.all(color: _LC.border, width: 1.2),
+        boxShadow: [
+          BoxShadow(
+            color: Colors.black.withValues(alpha: 0.04),
+            blurRadius: 10,
+            offset: const Offset(0, 3),
+          ),
+        ],
+      ),
       child: Row(
-        mainAxisAlignment: MainAxisAlignment.spaceBetween,
         children: [
-          Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              Text(
-                _isAppActive ? 'Vendors Near You 🏪' : "We're Closed 🔒",
-                style: const TextStyle(
-                  fontSize: 17,
-                  fontWeight: FontWeight.w800,
-                  color: _LC.textPrimary,
-                  fontFamily: 'Poppins',
-                ),
+          Container(
+            width: 44,
+            height: 44,
+            decoration: BoxDecoration(
+              gradient: const LinearGradient(
+                colors: [Color(0xFFFF8C5A), Color(0xFFFF6B2B)],
+                begin: Alignment.topLeft,
+                end: Alignment.bottomRight,
               ),
-              const SizedBox(height: 2),
-              Text(
-                _isAppActive
-                    ? (_userPosition != null
-                          ? 'Sorted by distance'
-                          : 'Haldwani area')
-                    : 'Opens at $_openTime daily',
-                style: const TextStyle(
-                  fontSize: 12,
-                  color: _LC.textMuted,
-                  fontFamily: 'Poppins',
+              borderRadius: BorderRadius.circular(13),
+              boxShadow: [
+                BoxShadow(
+                  color: _LC.accent.withValues(alpha: 0.28),
+                  blurRadius: 8,
+                  offset: const Offset(0, 3),
                 ),
+              ],
+            ),
+            child: const Center(
+              child: Text(
+                '🏪',
+                style: TextStyle(fontSize: 21),
               ),
-            ],
+            ),
+          ),
+          const SizedBox(width: 12),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                Text(
+                  _isAppActive ? 'Vendors Near You' : "We're Closed",
+                  style: const TextStyle(
+                    fontSize: 16.5,
+                    fontWeight: FontWeight.w800,
+                    color: _LC.textPrimary,
+                    fontFamily: 'Poppins',
+                    letterSpacing: -0.2,
+                  ),
+                ),
+                const SizedBox(height: 2),
+                Text(
+                  _isAppActive
+                      ? (_userPosition != null
+                            ? '📍 Showing closest food stalls & outlets'
+                            : '📍 Top street food outlets in Haldwani')
+                      : 'Opens at $_openTime daily',
+                  style: const TextStyle(
+                    fontSize: 11,
+                    color: _LC.textMuted,
+                    fontWeight: FontWeight.w500,
+                    fontFamily: 'Poppins',
+                  ),
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                ),
+              ],
+            ),
           ),
           if (_isAppActive && _filteredVendors.isNotEmpty)
             Container(
-              padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
+              padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
               decoration: BoxDecoration(
-                color: _LC.accentLight,
+                color: _LC.greenLight,
                 borderRadius: BorderRadius.circular(20),
-                border: Border.all(color: _LC.accentBorder),
+                border: Border.all(color: _LC.green.withValues(alpha: 0.3)),
               ),
-              child: Text(
-                '${_filteredVendors.length} open',
-                style: const TextStyle(
-                  color: _LC.accent,
-                  fontWeight: FontWeight.w700,
-                  fontSize: 11,
-                  fontFamily: 'Poppins',
-                ),
+              child: Row(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  Container(
+                    width: 7,
+                    height: 7,
+                    decoration: const BoxDecoration(
+                      color: _LC.green,
+                      shape: BoxShape.circle,
+                    ),
+                  ),
+                  const SizedBox(width: 5),
+                  Text(
+                    '${_filteredVendors.length} Open',
+                    style: const TextStyle(
+                      color: _LC.green,
+                      fontWeight: FontWeight.w700,
+                      fontSize: 11,
+                      fontFamily: 'Poppins',
+                    ),
+                  ),
+                ],
               ),
             ),
         ],
       ),
     );
+  }
+
+  List<Widget> _buildVendorExploreSlivers() {
+    final slivers = <Widget>[];
+
+    for (final v in _filteredVendors) {
+      final allVendorItems = _menuItemsMap[v.id] ?? [];
+      List<MenuItemModel> displayItems = allVendorItems;
+      if (_selectedCategory != 'All') {
+        displayItems = allVendorItems.where((item) {
+          final cats = item.category
+              .split(',')
+              .map((c) => c.trim().toLowerCase())
+              .toList();
+          return cats.contains(_selectedCategory.toLowerCase());
+        }).toList();
+      }
+
+      // Vendor Heading Card
+      slivers.add(
+        SliverToBoxAdapter(
+          child: Padding(
+            padding: const EdgeInsets.fromLTRB(16, 16, 16, 10),
+            child: Row(
+              children: [
+                Container(
+                  width: 4,
+                  height: 24,
+                  decoration: BoxDecoration(
+                    color: _LC.accent,
+                    borderRadius: BorderRadius.circular(2),
+                  ),
+                ),
+                const SizedBox(width: 8),
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Row(
+                        children: [
+                          Flexible(
+                            child: Text(
+                              v.name,
+                              style: const TextStyle(
+                                fontSize: 16,
+                                fontWeight: FontWeight.w800,
+                                color: _LC.textPrimary,
+                                fontFamily: 'Poppins',
+                              ),
+                              maxLines: 1,
+                              overflow: TextOverflow.ellipsis,
+                            ),
+                          ),
+                          if (v.rating != null) ...[
+                            const SizedBox(width: 6),
+                            Container(
+                              padding: const EdgeInsets.symmetric(
+                                horizontal: 6,
+                                vertical: 2,
+                              ),
+                              decoration: BoxDecoration(
+                                color: _LC.greenLight,
+                                borderRadius: BorderRadius.circular(6),
+                              ),
+                              child: Row(
+                                mainAxisSize: MainAxisSize.min,
+                                children: [
+                                  const Icon(
+                                    Icons.star_rounded,
+                                    size: 12,
+                                    color: _LC.green,
+                                  ),
+                                  const SizedBox(width: 2),
+                                  Text(
+                                    v.rating!.toStringAsFixed(1),
+                                    style: const TextStyle(
+                                      fontSize: 10.5,
+                                      fontWeight: FontWeight.w800,
+                                      color: _LC.green,
+                                      fontFamily: 'Poppins',
+                                    ),
+                                  ),
+                                ],
+                              ),
+                            ),
+                          ],
+                        ],
+                      ),
+                      const SizedBox(height: 2),
+                      Row(
+                        children: [
+                          if (v.distanceKm != null) ...[
+                            Text(
+                              '${v.distanceKm!.toStringAsFixed(1)} km',
+                              style: const TextStyle(
+                                fontSize: 11,
+                                color: _LC.textMuted,
+                                fontFamily: 'Poppins',
+                                fontWeight: FontWeight.w500,
+                              ),
+                            ),
+                            const Text(
+                              ' • ',
+                              style: TextStyle(color: _LC.textMuted),
+                            ),
+                          ],
+                          Text(
+                            '${v.deliveryMinutes ?? 15} min',
+                            style: const TextStyle(
+                              fontSize: 11,
+                              color: _LC.textMuted,
+                              fontFamily: 'Poppins',
+                              fontWeight: FontWeight.w500,
+                            ),
+                          ),
+                          if (v.discountText != null &&
+                              v.discountText!.isNotEmpty) ...[
+                            const Text(
+                              ' • ',
+                              style: TextStyle(color: _LC.textMuted),
+                            ),
+                            Text(
+                              v.discountText!,
+                              style: const TextStyle(
+                                fontSize: 10.5,
+                                color: _LC.accent,
+                                fontWeight: FontWeight.w700,
+                                fontFamily: 'Poppins',
+                              ),
+                            ),
+                          ],
+                        ],
+                      ),
+                    ],
+                  ),
+                ),
+                InkWell(
+                  onTap: () => _openVendorDetail(v),
+                  borderRadius: BorderRadius.circular(20),
+                  child: Container(
+                    padding: const EdgeInsets.symmetric(
+                      horizontal: 11,
+                      vertical: 5,
+                    ),
+                    decoration: BoxDecoration(
+                      color: _LC.accentLight,
+                      borderRadius: BorderRadius.circular(20),
+                      border: Border.all(color: _LC.accentBorder),
+                    ),
+                    child: Row(
+                      mainAxisSize: MainAxisSize.min,
+                      children: const [
+                        Text(
+                          'Visit Store',
+                          style: TextStyle(
+                            fontSize: 11,
+                            fontWeight: FontWeight.w700,
+                            color: _LC.accent,
+                            fontFamily: 'Poppins',
+                          ),
+                        ),
+                        SizedBox(width: 3),
+                        Icon(
+                          Icons.arrow_forward_ios_rounded,
+                          size: 10,
+                          color: _LC.accent,
+                        ),
+                      ],
+                    ),
+                  ),
+                ),
+              ],
+            ),
+          ),
+        ),
+      );
+
+      if (displayItems.isEmpty) {
+        // Fallback to vendor card if no menu items in this category
+        slivers.add(
+          SliverToBoxAdapter(
+            child: Padding(
+              padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 4),
+              child: VendorCard(
+                vendor: v,
+                onTap: () => _openVendorDetail(v),
+                layout: 'list',
+              ),
+            ),
+          ),
+        );
+      } else {
+        // 2-column Grid of items (up to 4 items)
+        final itemsToShow = displayItems.take(4).toList();
+        slivers.add(
+          SliverPadding(
+            padding: const EdgeInsets.symmetric(horizontal: 12),
+            sliver: SliverGrid(
+              gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
+                crossAxisCount: 2,
+                mainAxisSpacing: 10,
+                crossAxisSpacing: 10,
+                mainAxisExtent: 215,
+              ),
+              delegate: SliverChildBuilderDelegate(
+                (context, index) {
+                  return ExploreItemCard(
+                    item: itemsToShow[index],
+                    onTap: () => _openItemDetail(itemsToShow[index], v),
+                  );
+                },
+                childCount: itemsToShow.length,
+              ),
+            ),
+          ),
+        );
+
+        if (displayItems.length > 4) {
+          slivers.add(
+            SliverToBoxAdapter(
+              child: Padding(
+                padding: const EdgeInsets.fromLTRB(16, 8, 16, 4),
+                child: Center(
+                  child: InkWell(
+                    onTap: () => _openVendorDetail(v),
+                    borderRadius: BorderRadius.circular(16),
+                    child: Container(
+                      padding: const EdgeInsets.symmetric(
+                        horizontal: 16,
+                        vertical: 7,
+                      ),
+                      decoration: BoxDecoration(
+                        color: _LC.surface,
+                        borderRadius: BorderRadius.circular(16),
+                        border: Border.all(color: _LC.border),
+                      ),
+                      child: Text(
+                        'View all ${displayItems.length} items from ${v.name} →',
+                        style: const TextStyle(
+                          fontSize: 11.5,
+                          fontWeight: FontWeight.w700,
+                          color: _LC.accent,
+                          fontFamily: 'Poppins',
+                        ),
+                      ),
+                    ),
+                  ),
+                ),
+              ),
+            ),
+          );
+        }
+      }
+
+      // Divider between vendors
+      slivers.add(
+        SliverToBoxAdapter(
+          child: Container(
+            margin: const EdgeInsets.fromLTRB(16, 16, 16, 4),
+            height: 1,
+            color: _LC.border.withValues(alpha: 0.7),
+          ),
+        ),
+      );
+    }
+
+    return slivers;
   }
 
   Widget _buildEmptyState() {
@@ -767,33 +1272,31 @@ class _StreetFoodScreenState extends State<StreetFoodScreen>
   }
 }
 
-// ── Street Food Header Delegate ──────────────────────────────
+// ── Street Food Header Delegate (Clean White Surface Matching Sweets & Meals) ──
 class _StreetFoodHeaderDelegate extends SliverPersistentHeaderDelegate {
   final bool isAppActive;
   final List<VendorModel> allVendors;
   final double topPadding;
-  final Map<String, List<MenuItemModel>> menuItemsMap; // ✅ FIX 7 — new param
+  final Map<String, List<MenuItemModel>> menuItemsMap;
 
   _StreetFoodHeaderDelegate({
     required this.isAppActive,
     required this.allVendors,
     required this.topPadding,
-    required this.menuItemsMap, // ✅ FIX 8 — required
+    required this.menuItemsMap,
   });
 
-  static const double _headerContentHeight = 72.0;
-
   @override
-  double get minExtent => topPadding + _headerContentHeight;
+  double get minExtent => topPadding + 58;
   @override
-  double get maxExtent => topPadding + _headerContentHeight;
+  double get maxExtent => topPadding + 58;
 
   @override
   bool shouldRebuild(_StreetFoodHeaderDelegate old) {
     return old.isAppActive != isAppActive ||
         old.allVendors != allVendors ||
         old.topPadding != topPadding ||
-        old.menuItemsMap != menuItemsMap; // ✅ FIX 9 — rebuild check
+        old.menuItemsMap != menuItemsMap;
   }
 
   @override
@@ -803,78 +1306,128 @@ class _StreetFoodHeaderDelegate extends SliverPersistentHeaderDelegate {
     bool overlapsContent,
   ) {
     return Container(
-      height: topPadding + _headerContentHeight,
-      decoration: const BoxDecoration(
-        gradient: LinearGradient(
-          begin: Alignment.topCenter,
-          end: Alignment.bottomCenter,
-          colors: [Color(0xFFFF6B35), Color(0xFFFF8C5A)],
+      padding: EdgeInsets.only(top: topPadding, left: 16, right: 16),
+      decoration: BoxDecoration(
+        color: _LC.surface,
+        border: Border(
+          bottom: BorderSide(
+            color: _LC.border.withValues(alpha: shrinkOffset > 0 ? 1 : 0),
+            width: 0.8,
+          ),
         ),
+        boxShadow: shrinkOffset > 0
+            ? [
+                BoxShadow(
+                  color: Colors.black.withValues(alpha: 0.04),
+                  blurRadius: 8,
+                  offset: const Offset(0, 2),
+                ),
+              ]
+            : null,
       ),
-      child: Padding(
-        padding: EdgeInsets.fromLTRB(16, topPadding + 12, 16, 12),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            Row(
+      child: Row(
+        children: [
+          Container(
+            padding: const EdgeInsets.all(7),
+            decoration: BoxDecoration(
+              color: _LC.accentLight,
+              borderRadius: BorderRadius.circular(10),
+            ),
+            child: const Icon(
+              Icons.storefront_rounded,
+              color: _LC.accent,
+              size: 20,
+            ),
+          ),
+          const SizedBox(width: 10),
+          Expanded(
+            child: Column(
+              mainAxisAlignment: MainAxisAlignment.center,
+              crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                const Text('🥟', style: TextStyle(fontSize: 20)),
-                const SizedBox(width: 8),
-                const Expanded(
-                  child: Text(
-                    'Street Food',
-                    style: TextStyle(
-                      color: Colors.white,
-                      fontSize: 20,
-                      fontWeight: FontWeight.w800,
-                      fontFamily: 'Poppins',
-                    ),
+                const Text(
+                  'Street Food',
+                  style: TextStyle(
+                    fontSize: 16,
+                    fontWeight: FontWeight.w800,
+                    color: _LC.textPrimary,
+                    fontFamily: 'Poppins',
                   ),
                 ),
-                Container(
-                  padding: const EdgeInsets.symmetric(
-                    horizontal: 10,
-                    vertical: 5,
-                  ),
-                  decoration: BoxDecoration(
-                    color: Colors.white.withOpacity(0.20),
-                    borderRadius: BorderRadius.circular(20),
-                    border: Border.all(color: Colors.white.withOpacity(0.35)),
-                  ),
-                  child: Row(
-                    mainAxisSize: MainAxisSize.min,
-                    children: [
-                      Container(
-                        width: 6,
-                        height: 6,
-                        decoration: BoxDecoration(
-                          color: isAppActive ? _LC.green : _LC.red,
-                          shape: BoxShape.circle,
-                        ),
-                      ),
-                      const SizedBox(width: 5),
-                      Text(
-                        isAppActive ? 'Open' : 'Closed',
-                        style: const TextStyle(
-                          color: Colors.white,
-                          fontSize: 11,
-                          fontWeight: FontWeight.w700,
-                          fontFamily: 'Poppins',
-                        ),
-                      ),
-                    ],
+                Text(
+                  '${allVendors.length} vendors in Haldwani',
+                  style: const TextStyle(
+                    fontSize: 11,
+                    color: _LC.textSecondary,
+                    fontWeight: FontWeight.w500,
+                    fontFamily: 'Poppins',
                   ),
                 ),
               ],
             ),
-
-          ],
-        ),
+          ),
+          // Search Icon Button
+          InkWell(
+            onTap: () {
+              HapticFeedback.lightImpact();
+              Navigator.push(
+                context,
+                MaterialPageRoute(builder: (_) => const SearchScreen()),
+              );
+            },
+            borderRadius: BorderRadius.circular(20),
+            child: Container(
+              padding: const EdgeInsets.all(7),
+              margin: const EdgeInsets.only(right: 8),
+              decoration: BoxDecoration(
+                color: _LC.background,
+                shape: BoxShape.circle,
+                border: Border.all(color: _LC.border),
+              ),
+              child: const Icon(
+                Icons.search_rounded,
+                size: 17,
+                color: _LC.textPrimary,
+              ),
+            ),
+          ),
+          // Status Badge
+          Container(
+            padding: const EdgeInsets.symmetric(horizontal: 9, vertical: 4),
+            decoration: BoxDecoration(
+              color: (isAppActive ? _LC.green : _LC.red).withValues(alpha: 0.1),
+              borderRadius: BorderRadius.circular(12),
+              border: Border.all(
+                color: (isAppActive ? _LC.green : _LC.red).withValues(alpha: 0.3),
+              ),
+            ),
+            child: Row(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                Icon(
+                  Icons.circle,
+                  color: isAppActive ? _LC.green : _LC.red,
+                  size: 8,
+                ),
+                const SizedBox(width: 4),
+                Text(
+                  isAppActive ? 'Open' : 'Closed',
+                  style: TextStyle(
+                    fontSize: 11,
+                    fontWeight: FontWeight.w700,
+                    color: isAppActive ? _LC.green : _LC.red,
+                    fontFamily: 'Poppins',
+                  ),
+                ),
+              ],
+            ),
+          ),
+        ],
       ),
     );
   }
 }
+
 
 // ── Location Banner ──────────────────────────────────────────
 class _LocationPermissionBanner extends StatelessWidget {
@@ -896,7 +1449,7 @@ class _LocationPermissionBanner extends StatelessWidget {
         decoration: BoxDecoration(
           color: _LC.warningLight,
           borderRadius: BorderRadius.circular(12),
-          border: Border.all(color: _LC.warning.withOpacity(0.35)),
+          border: Border.all(color: _LC.warning.withValues(alpha: 0.35)),
         ),
         child: Row(
           children: [
@@ -904,7 +1457,7 @@ class _LocationPermissionBanner extends StatelessWidget {
               width: 34,
               height: 34,
               decoration: BoxDecoration(
-                color: _LC.warning.withOpacity(0.15),
+                color: _LC.warning.withValues(alpha: 0.15),
                 borderRadius: BorderRadius.circular(10),
               ),
               child: const Icon(

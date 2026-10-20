@@ -673,6 +673,8 @@ class OrderService {
         orderId: placedOrder2.id,
         vendorName: vendor.name,
         amount: total,
+        vendorId: vendor.id,
+        itemsCount: itemsList.length,
         deliveryCharge: deliveryCharge.toDouble(),
       );
     }
@@ -688,6 +690,8 @@ class OrderService {
     required String orderId,
     required String vendorName,
     required double amount,
+    required String vendorId,
+    required int itemsCount,
     double deliveryCharge = 15.0,
   }) async {
     try {
@@ -707,6 +711,13 @@ class OrderService {
           amount: amount,
         );
       }
+
+      await PushNotificationSender.newOrderToVendor(
+        vendorId: vendorId,
+        orderShortId: shortId,
+        amount: amount,
+        itemsCount: itemsCount,
+      );
 
       final riderTokens = await _client
           .from('device_tokens')

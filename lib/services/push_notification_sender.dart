@@ -93,6 +93,21 @@ class PushNotificationSender {
     );
   }
 
+  static Future<void> newOrderToVendor({
+    required String vendorId,
+    required String orderShortId,
+    required double amount,
+    required int itemsCount,
+  }) async {
+    await _send(
+      userId: vendorId,
+      title: '🚨 NEW ORDER! #$orderShortId',
+      body: 'You received a new order for ₹${amount.toStringAsFixed(0)} ($itemsCount items). Accept now!',
+      type: 'new_vendor_order',
+      extraData: {'order_short_id': orderShortId},
+    );
+  }
+
   static Future<void> orderAcceptedToCustomer({
     required String customerId,
     required String riderName,

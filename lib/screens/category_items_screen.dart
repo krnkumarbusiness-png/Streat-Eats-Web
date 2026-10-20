@@ -154,7 +154,7 @@ class _CategoryItemsScreenState extends State<CategoryItemsScreen> {
                           crossAxisCount: 2,
                           crossAxisSpacing: 10,
                           mainAxisSpacing: 10,
-                          childAspectRatio: 0.62,
+                          childAspectRatio: 0.76,
                         ),
                         itemCount: _items.length,
                         itemBuilder: (_, i) => ExploreItemCard(

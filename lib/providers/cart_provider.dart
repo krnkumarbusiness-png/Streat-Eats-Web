@@ -406,10 +406,24 @@ class CartProvider extends ChangeNotifier {
     return ids.length;
   }
 
+  // ── Stray Dog Feeding Donation ──────────────────────────────
+  int _donationAmount = 0;
+  int get donationAmount => _donationAmount;
+
+  void setDonation(int amount) {
+    _donationAmount = amount;
+    notifyListeners();
+  }
+
+  // ── Free Delivery Getters for UI Progress Bar ────────────────
+  bool get isFreeDeliveryEnabled => _freeDeliveryEnabled;
+  double get freeDeliveryMinAmount => _freeDeliveryMinAmount;
+  double get freeDeliveryMaxDistance => _freeDeliveryMaxDistance;
+
   // v3.0 — total includes packaging fee
-  // v5.0 — includes addonSubtotal and subtracts cart threshold discount
+  // v5.0 — includes addonSubtotal, donation, tip, and subtracts cart threshold discount
   double get total =>
-      (subtotal + platformFee + deliveryCharge + packagingFee + _tipAmount + addonSubtotal - _appliedDiscount)
+      (subtotal + platformFee + deliveryCharge + packagingFee + _tipAmount + _donationAmount + addonSubtotal - _appliedDiscount)
           .clamp(0.0, double.infinity);
 
   // ── Single source of truth for cash round-off ──────────────────
@@ -525,11 +539,13 @@ class CartProvider extends ChangeNotifier {
     return total;
   }
 
+  int getItemQuantity(String itemId) => getTotalQuantity(itemId);
+
   String _cartKey(String userId) => 'se_cart_v2_$userId';
   String? get _currentUserId => Supabase.instance.client.auth.currentUser?.id;
 
   double calculateDeliveryCharge(double distanceKm) {
-    if (_freeDeliveryEnabled && this.subtotal >= _freeDeliveryMinAmount && distanceKm <= _freeDeliveryMaxDistance) {
+    if (_freeDeliveryEnabled && subtotal >= _freeDeliveryMinAmount && distanceKm <= _freeDeliveryMaxDistance) {
       return 0.0; // FREE 🎉
     }
     if (distanceKm <= 1) return _deliveryCharge0_1;
@@ -541,12 +557,42 @@ class CartProvider extends ChangeNotifier {
     return _deliveryCharge4_5 + (extraKm * _deliveryChargeExtraPerKm);
   }
 
+  RealtimeChannel? _cartGrowthChannel;
+  RealtimeChannel? _cartSettingsChannel;
+
+  void _setupRealtimeListeners() {
+    if (_cartGrowthChannel != null) return;
+    try {
+      _cartGrowthChannel = Supabase.instance.client
+          .channel('public:cart_growth_configs')
+          .onPostgresChanges(
+            event: PostgresChangeEvent.all,
+            schema: 'public',
+            table: 'app_growth_configs',
+            callback: (_) => reloadSettings(),
+          )
+          .subscribe();
+
+      _cartSettingsChannel = Supabase.instance.client
+          .channel('public:cart_app_settings')
+          .onPostgresChanges(
+            event: PostgresChangeEvent.all,
+            schema: 'public',
+            table: 'app_settings',
+            callback: (_) => reloadSettings(),
+          )
+          .subscribe();
+    } catch (_) {}
+  }
+
   Future<void> loadSettings() async {
+    _setupRealtimeListeners();
     if (_settingsLoaded) return;
     await _fetchSettingsFromDB();
   }
 
   Future<void> reloadSettings() async {
+    _setupRealtimeListeners();
     _settingsLoaded = false;
     await _fetchSettingsFromDB();
   }
@@ -595,6 +641,24 @@ class CartProvider extends ChangeNotifier {
         _freeDeliveryEnabled = data['free_delivery_enabled'] as bool? ?? false;
         _freeDeliveryMinAmount = (data['free_delivery_min_amount'] as num?)?.toDouble() ?? 0.0;
         _freeDeliveryMaxDistance = (data['free_delivery_max_distance'] as num?)?.toDouble() ?? 0.0;
+
+        // ✅ Also check app_growth_configs for real-time admin override
+        try {
+          final growthRes = await Supabase.instance.client
+              .from('app_growth_configs')
+              .select('free_delivery_enabled, free_delivery_threshold')
+              .eq('id', 'default_config')
+              .maybeSingle();
+          if (growthRes != null) {
+            if (growthRes['free_delivery_enabled'] != null) {
+              _freeDeliveryEnabled = growthRes['free_delivery_enabled'] as bool;
+            }
+            final th = (growthRes['free_delivery_threshold'] as num?)?.toDouble();
+            if (th != null && th > 0) {
+              _freeDeliveryMinAmount = th;
+            }
+          }
+        } catch (_) {}
 
         _settingsLoaded = true;
         notifyListeners();
@@ -755,6 +819,7 @@ class CartProvider extends ChangeNotifier {
     _confirmedPinDistanceKm = null;
     _selectedDeliveryAddress = null;
     _tipAmount = 0; // ✅ Reset tip on cart clear
+    _donationAmount = 0; // ✅ Reset donation on cart clear
     _appliedDiscount = 0; // ✅ Reset cart threshold discount
     _selectedAddons = []; // ✅ Reset addon items
     _clearCartPrefs();
@@ -857,5 +922,14 @@ class CartProvider extends ChangeNotifier {
     } catch (e) {
       debugPrint('Cart clear prefs error: $e');
     }
+  }
+
+  @override
+  void dispose() {
+    try {
+      _cartGrowthChannel?.unsubscribe();
+      _cartSettingsChannel?.unsubscribe();
+    } catch (_) {}
+    super.dispose();
   }
 }
