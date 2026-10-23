@@ -32,10 +32,13 @@ class AuthService {
   }
 
   // ── Google Sign In ─────────────────────────────────────────────
+  static const String _defaultWebClientId =
+      '519115337121-h4rqiog9eeq6csmbm840jbnfhch7tm5r.apps.googleusercontent.com';
+
   GoogleSignIn get _googleSignIn => GoogleSignIn(
-    clientId: dotenv.env['GOOGLE_WEB_CLIENT_ID'],
-    serverClientId: dotenv.env['GOOGLE_WEB_CLIENT_ID'],
-    scopes: ['email', 'profile'],
+    clientId: dotenv.env['GOOGLE_WEB_CLIENT_ID'] ?? _defaultWebClientId,
+    serverClientId: dotenv.env['GOOGLE_WEB_CLIENT_ID'] ?? _defaultWebClientId,
+    scopes: ['email', 'profile', 'openid'],
   );
 
   Future<AuthResponse> signInWithGoogle({bool isRider = false}) async {
@@ -56,8 +59,15 @@ class AuthService {
       if (googleUser == null) throw Exception('Google sign in cancelled.');
 
       final googleAuth = await googleUser.authentication;
-      final idToken = googleAuth.idToken;
-      final accessToken = googleAuth.accessToken;
+      var idToken = googleAuth.idToken;
+      var accessToken = googleAuth.accessToken;
+
+      if (idToken == null) {
+        // Retry authentication once in case of Web token delay
+        final retryAuth = await googleUser.authentication;
+        idToken = retryAuth.idToken;
+        accessToken = retryAuth.accessToken ?? accessToken;
+      }
 
       if (idToken == null) {
         throw Exception(
@@ -316,6 +326,11 @@ class AuthService {
         msg.contains('sign_in_canceled') ||
         msg.contains('sign_in_failed')) {
       return 'Google sign in cancel ho gaya.';
+    }
+    if (msg.contains('people api') ||
+        msg.contains('service_disabled') ||
+        msg.contains('people.googleapis.com')) {
+      return 'Google Sign-In: People API is disabled in Google Cloud Console. Please enable People API in project 519115337121 and try again.';
     }
     if (msg.contains('google id token nahi mila') ||
         msg.contains('web client id')) {
